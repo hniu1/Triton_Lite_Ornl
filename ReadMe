@@ -1,9 +1,7 @@
-# TritonLite Surrogate Modeling
+# Triton Surrogate Modeling
 
-This repository contains a **PyTorch reimplementation** of the TritonLite surrogate model pipeline for flood inundation modeling (Sugar Creek case study).  
+This repository contains a **PyTorch reimplementation** of the Triton surrogate model pipeline for flood inundation modeling (Sugar Creek case study).  
 It replaces the original TensorFlow/Keras prototype with a modular, professional workflow that supports **data loading, hyperparameter tuning, training, and prediction/export**.
-
----
 
 ## Repository Structure
 
@@ -13,8 +11,6 @@ It replaces the original TensorFlow/Keras prototype with a modular, professional
 ├── predict.py # Runs inference, exports GeoTIFFs, mosaics, metrics, histogram
 ├── tritonlite_sugar_creek.cfg # Config file with paths, columns, settings
 └── artifacts/ # Saved configs, checkpoints, outputs
-
----
 
 ## ⚙️ Requirements
 
