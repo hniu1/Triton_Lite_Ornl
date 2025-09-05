@@ -1,0 +1,19 @@
+data:
+  bands: 480
+  height: 80
+  in_features: 12
+  width: 80
+model:
+  dropout: 0.339215506224199
+  hidden:
+  - 288
+  - 352
+  - 768
+  name: mlp
+  out_dim: 19200
+train:
+  batch_size: 64
+  early_stop_patience: 10
+  epochs: 100
+  lr: 0.004096653729616028
+  val_ratio: 0.1

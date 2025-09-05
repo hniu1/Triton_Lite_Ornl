@@ -1,0 +1,137 @@
+# TritonLite Surrogate Modeling
+
+This repository contains a **PyTorch reimplementation** of the TritonLite surrogate model pipeline for flood inundation modeling (Sugar Creek case study).  
+It replaces the original TensorFlow/Keras prototype with a modular, professional workflow that supports **data loading, hyperparameter tuning, training, and prediction/export**.
+
+---
+
+## Repository Structure
+
+├── data_loader.py # Loads rasters (targets) + tabular CSV (features), handles scaling
+├── tuning.py # Runs Optuna-based hyperparameter tuning
+├── train.py # Trains model with best params (or defaults), saves checkpoint
+├── predict.py # Runs inference, exports GeoTIFFs, mosaics, metrics, histogram
+├── tritonlite_sugar_creek.cfg # Config file with paths, columns, settings
+└── artifacts/ # Saved configs, checkpoints, outputs
+
+---
+
+## ⚙️ Requirements
+
+- Python 3.9+
+- PyTorch >= 2.0  
+- Optuna (for hyperparameter tuning)  
+- scikit-learn  
+- rasterio  
+- matplotlib  
+- numpy, pandas, PyYAML, configparser  
+
+Install with:
+
+```bash
+pip install torch optuna scikit-learn rasterio matplotlib numpy pandas pyyaml
+```
+
+## Workflow
+
+1. Prepare config file
+
+All paths and settings are defined in Triton_Lite_Ornl/tritonlite_sugar_creek.cfg.
+This includes:
+
+- Paths to raster data (base_dir)
+
+- Path to tabular CSV (hyg_dir)
+
+- Output directories
+
+- Number of blocks per set
+
+- Columns to keep (features)
+
+Make sure your data directory structure matches the expected layout.
+
+2. Data Loading
+
+```bash
+python data_loader.py
+```
+
+This will:
+
+- Load training/test rasters
+
+- Load tabular features
+
+- Scale features with StandardScaler (fit on train only)
+
+- Print shapes and metadata
+
+3. Hyperparameter Tuning
+
+Run random search with Optuna pruning:
+
+```bash
+python tuning.py
+```
+
+- Uses a 10% validation split
+
+- Runs 20 trials (default), each with early stopping
+
+- Saves best config to artifacts/best_config.yaml
+
+4. Training
+
+Train with tuned params (if available) or defaults:
+
+```bash
+python train.py
+```
+
+5. Prediction & Export
+
+Run inference on test set:
+
+```bash
+python predict.py
+```
+
+- Loads checkpoint (artifacts/best.pt)
+
+- Predicts flattened targets
+
+- Splits/reshapes predictions into (bands, H, W) blocks
+
+- Exports GeoTIFFs for each block
+
+- Builds mosaics
+
+- Computes per-pixel maxima (MOM rasters)
+
+- Subtracts GT vs. predictions, writes diff raster
+
+- Prints metrics (F2, CSI, RMSE)
+
+- Saves histogram plot to result_dir
+
+## Outputs
+
+1. artifacts/
+
+    - best_config.yaml → tuned hyperparams
+
+    - best.pt → trained model weights
+
+2. base_dir_tritonlite/ (from config)
+
+    - Block-level predicted GeoTIFFs
+
+    - Mosaic + MOM rasters
+
+3. result_dir/ (from config)
+
+    - diff_pred_vs_gt.tif → difference raster
+
+    - sugar_creek_histogram.png → histogram plot of differences
+
