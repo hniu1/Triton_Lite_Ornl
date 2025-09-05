@@ -5,12 +5,14 @@ It replaces the original TensorFlow/Keras prototype with a modular, professional
 
 ## Repository Structure
 
+```text
 ├── data_loader.py # Loads rasters (targets) + tabular CSV (features), handles scaling
 ├── tuning.py # Runs Optuna-based hyperparameter tuning
 ├── train.py # Trains model with best params (or defaults), saves checkpoint
 ├── predict.py # Runs inference, exports GeoTIFFs, mosaics, metrics, histogram
 ├── tritonlite_sugar_creek.cfg # Config file with paths, columns, settings
 └── artifacts/ # Saved configs, checkpoints, outputs
+```
 
 ## ⚙️ Requirements
 
