@@ -6,48 +6,12 @@ import pandas as pd
 
 
 # ---------------- helpers ----------------
-def _process_txt_bytes(txt_bytes: bytes, n_locations: int = 300, comment_prefix: str = "%") -> pd.DataFrame:
-    """Parse hyg text (bytes) → DataFrame with ['Time (hr)', Loc1..LocN]."""
-    text = txt_bytes.decode("utf-8", errors="ignore")
-    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith(comment_prefix)]
-    if not lines:
-        raise ValueError("No data lines after removing comments.")
-    buf = io.StringIO("\n".join(lines))
 
-    # try whitespace-delimited, then comma-delimited
-    df = None
-    for kwargs in (dict(delim_whitespace=True, header=None), dict(sep=",", header=None)):
-        buf.seek(0)
-        try:
-            df = pd.read_csv(buf, **kwargs)
-            break
-        except Exception:
-            df = None
-    if df is None:
-        raise ValueError("Unable to parse HYG text as whitespace or CSV.")
-
-    # pad if not enough columns
-    expect_cols = n_locations + 1
-    if df.shape[1] < expect_cols:
-        for _ in range(expect_cols - df.shape[1]):
-            df[f"_pad_{_}"] = np.nan
-        df = df.iloc[:, :expect_cols]
-
-    cols = ["Time (hr)"] + [f"Loc{i}" for i in range(1, n_locations + 1)]
-    df.columns = cols
-    # coerce numeric & sort by time
-    df = df.apply(pd.to_numeric, errors="coerce")
-    df = df.drop_duplicates(subset=["Time (hr)"]).sort_values("Time (hr)").reset_index(drop=True)
+def process_txt_content(txt_content):
+    csv_content = '\n'.join(line for line in txt_content.splitlines() if not line.startswith('%'))
+    df = pd.read_csv(io.StringIO(csv_content), header=None)
+    df.columns = ['Time (hr)'] + [f'Loc{i}' for i in range(1, 301)]
     return df
-
-
-def _find_hyg_member(zf: zipfile.ZipFile, pattern=r".*/input/hyg/.*\.txt") -> str | None:
-    rx = re.compile(pattern)
-    for name in zf.namelist():
-        if rx.fullmatch(name) or rx.match(name):
-            return name
-    return None
-
 
 # ---------------- step 1: extract ----------------
 def extract_from_zips(cfg: configparser.ConfigParser, n_locations: int = 300) -> None:
@@ -75,19 +39,19 @@ def extract_from_zips(cfg: configparser.ConfigParser, n_locations: int = 300) ->
             print(f"[extract] MISSING zip: {zip_path}")
             continue
 
-        try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                member = _find_hyg_member(zf)
-                if member is None:
-                    print(f"[extract] No */input/hyg/*.txt inside {zip_path}")
-                    continue
-                with zf.open(member) as f:
-                    df = _process_txt_bytes(f.read(), n_locations=n_locations)
-            df.to_csv(out_csv, index=False)
-            print(f"[extract] wrote {out_csv} (rows={len(df)}, cols={df.shape[1]})")
-        except Exception as e:
-            print(f"[extract] ERROR {ev}: {e}")
+        txt_file_path = f'D{i:03}/input/hyg/D001.txt'
 
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            with zip_ref.open(txt_file_path) as file:
+                txt_content = file.read().decode('utf-8')
+                df = process_txt_content(txt_content)
+
+
+        # Check if the file already exists and is not in use
+        
+        df.to_csv(out_csv, index=False)
+        print(f'Data from {zip_path} processed and saved to {out_csv}')
+        
 
 # ---------------- step 2: resample ----------------
 def resample_to_interval(cfg: configparser.ConfigParser) -> None:
@@ -98,7 +62,7 @@ def resample_to_interval(cfg: configparser.ConfigParser) -> None:
     S = cfg["Settings"]
     input_dir   = Path(S["input_dir"])
     output_dir  = Path(S["output_dir"])
-    new_dt      = float(S["new_interval"])     # hours (e.g., 0.5 = 30 min)
+    new_interval      = float(S["new_interval"])     # hours (e.g., 0.5 = 30 min)
     start_ev    = int(S["start_event"])
     end_ev      = int(S["end_event"])
 
@@ -116,45 +80,36 @@ def resample_to_interval(cfg: configparser.ConfigParser) -> None:
             print(f"[resample] missing input, skip: {inp}")
             continue
 
-        df = pd.read_csv(inp)
-        if "Time (hr)" not in df.columns:
-            print(f"[resample] invalid schema (no 'Time (hr)'): {inp}")
-            continue
+        data = pd.read_csv(inp)
+        # Create a new DataFrame for the interpolated time values
+        new_time_values = np.arange(0, data['Time (hr)'].iloc[-1] + new_interval, new_interval)
+        interpolated_data = pd.DataFrame(new_time_values, columns=['Time (hr)'])
 
-        t = pd.to_numeric(df["Time (hr)"], errors="coerce").to_numpy()
-        mask_t = np.isfinite(t)
-        t = t[mask_t]
-        if t.size < 2:
-            print(f"[resample] not enough time points in {inp}")
-            continue
+        # Interpolate the data for each location
+        for location in data.columns[1:]:
+            interpolated_data = interpolated_data.join(
+                pd.DataFrame(
+                    np.interp(
+                        interpolated_data['Time (hr)'],
+                        data['Time (hr)'],
+                        data[location]
+                    ),
+                    columns=[location]
+                )
+            )
 
-        t_min, t_max = float(np.min(t)), float(np.max(t))
-        new_t = np.arange(t_min, t_max + 1e-9, new_dt, dtype=float)
+        # Delete the first row of the interpolated data
+        interpolated_data = interpolated_data.drop(interpolated_data.index[0])
 
-        out_df = pd.DataFrame({"Time (hr)": new_t})
-        for col in df.columns:
-            if col == "Time (hr)":
-                continue
-            y = pd.to_numeric(df[col], errors="coerce").to_numpy()
-            y = y[: len(mask_t)]
-            finite = mask_t & np.isfinite(y)
-            if finite.sum() < 2:
-                out_df[col] = np.nan
-                continue
-            out_df[col] = np.interp(new_t, t[finite], y[finite])
-
-        # Match your original: drop the first row after interpolation
-        if len(out_df) > 0:
-            out_df = out_df.iloc[1:].reset_index(drop=True)
-
-        out_df.to_csv(out, index=False)
-        print(f"[resample] wrote {out} (rows={len(out_df)}, cols={out_df.shape[1]})")
+        # Save the interpolated data to a new CSV file
+        interpolated_data.to_csv(out, index=False)
+        print(f'Interpolated file saved to {out}')
 
 
 # ---------------- CLI ----------------
 def main():
     ap = argparse.ArgumentParser("Flow data processing (extract + resample)")
-    ap.add_argument("--cfg", required=True, help="Path to .cfg (with [Settings])")
+    ap.add_argument("--cfg", default="/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/preprocess/convert_hyg_3hrs_to_30mins.cfg", help="Path to .cfg (with [Settings])")
     ap.add_argument("--step", choices=["extract", "resample", "both"], default="both")
     ap.add_argument("--n_locations", type=int, default=300, help="Number of Loc columns to expect")
     args = ap.parse_args()
@@ -162,8 +117,8 @@ def main():
     cfg = configparser.ConfigParser()
     cfg.read(args.cfg)
 
-    if args.step in ("extract", "both"):
-        extract_from_zips(cfg, n_locations=args.n_locations)
+    # if args.step in ("extract", "both"):
+    #     extract_from_zips(cfg, n_locations=args.n_locations)
     if args.step in ("resample", "both"):
         resample_to_interval(cfg)
 
