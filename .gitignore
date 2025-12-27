@@ -1,0 +1,9 @@
+####################################
+# Data files (large / generated)
+####################################
+
+processed_data/
+results/
+shapefiles/
+shapefiles/blocks_*
+shapefiles/MOM_raster_*

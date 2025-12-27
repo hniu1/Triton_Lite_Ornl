@@ -37,25 +37,27 @@ def _load_set_stack(
 
 def load_tritonlite_data(
     base_dir: str,
-    hyg_csv: str,
+    hyg_dir: str,
     train_sets: List[str],
     test_set: str,
-    *,
+    # *,
     blocks: int,
     threshold: float = 0.1,
     columns_to_keep: List[str] = None,
-    train_row_slice: slice = slice(0, 18240),
-    test_row_slice: slice = slice(18240, None),
+    # train_row_slice: slice = slice(0, 18240),
+    # test_row_slice: slice = slice(18240, None),
     pattern: str = "sugar_creek_ACC_{set}_sugar_creek_block_{i}.tif",
 ):
     """
     Returns:
-      X_train [N_train, F], X_test [N_test, F],
-      Y_train_flat [N_train, K], Y_test_flat [N_test, K],
-      meta (bands/height/width), scaler (fitted StandardScaler)
+      x_train [N_train, steps, features],
+      x_test  [N_test,  steps, features],
+      Y_train_flat [N_train, K],
+      Y_test_flat  [N_test,  K],
+      meta (bands/height/width),
+      scaler (fitted StandardScaler)
     """
     # --- Targets (rasters) ---
-    # Train: load each set, then vstack across sets along sample axis
     Y_train_list = []
     shared_meta = None
     for s in train_sets:
@@ -63,61 +65,90 @@ def load_tritonlite_data(
         if shared_meta is None:
             shared_meta = meta
         else:
-            # sanity: consistent band/shape
             assert (meta["bands"], meta["height"], meta["width"]) == \
                    (shared_meta["bands"], shared_meta["height"], shared_meta["width"]), \
                    f"Shape mismatch in set {s}"
         Y_train_list.append(Y_set)
+
     if not Y_train_list:
         raise RuntimeError("No training data found.")
-    Y_train = np.vstack(Y_train_list)                  # [sum_sets*bands, blocks*H*W]?  (matches your script)
 
-    # Test: single set
+    Y_train = np.vstack(Y_train_list)
     Y_test, _ = _load_set_stack(base_dir, test_set, blocks, threshold, pattern)
 
-    # Flatten targets to [N, K] for MLPs
+    # Flatten targets
     Y_train_flat = Y_train.reshape(Y_train.shape[0], -1).astype(np.float32)
     Y_test_flat  = Y_test.reshape(Y_test.shape[0], -1).astype(np.float32)
 
     # --- Inputs (tabular X) ---
     if columns_to_keep is None:
         raise ValueError("columns_to_keep must be provided.")
-    df = pd.read_csv(hyg_csv, usecols=columns_to_keep)
+
+    # Load HYG CSVs in train_sets and test_sets separately under hyg_dir
+    def load_hyg_files(sets: List[str]) -> pd.DataFrame:
+        files = []
+        for s in sets:
+            files.extend(Path(hyg_dir).glob(f"interpolated_data_processed_data_{s}.csv"))
+        if not files:
+            raise RuntimeError(f"No HYG CSV files found for sets: {sets}")
+        df_list = []
+        for f in files:
+            df_list.append(pd.read_csv(f, usecols=columns_to_keep))
+        return pd.concat(df_list, ignore_index=True)
+    
+    df_train = load_hyg_files(train_sets)
+    df_test  = load_hyg_files([test_set])
 
     scaler = StandardScaler()
-    X_train = scaler.fit_transform(df.iloc[train_row_slice].to_numpy()).astype(np.float32)
-    X_test  = scaler.transform(df.iloc[test_row_slice].to_numpy()).astype(np.float32)
+    X_train = scaler.fit_transform(df_train.to_numpy()).astype(np.float32)
+    X_test  = scaler.transform(df_test.to_numpy()).astype(np.float32)
 
-    # sanity: row counts match between X and Y
-    assert X_train.shape[0] == Y_train_flat.shape[0], f"X_train rows {X_train.shape[0]} != Y_train rows {Y_train_flat.shape[0]}"
-    assert X_test.shape[0]  == Y_test_flat.shape[0],  f"X_test rows {X_test.shape[0]}  != Y_test rows {Y_test_flat.shape[0]}"
+    # Sanity checks
+    assert X_train.shape[0] == Y_train_flat.shape[0], \
+        f"X_train rows {X_train.shape[0]} != Y_train rows {Y_train_flat.shape[0]}"
+    assert X_test.shape[0] == Y_test_flat.shape[0], \
+        f"X_test rows {X_test.shape[0]} != Y_test rows {Y_test_flat.shape[0]}"
 
-    return X_train, X_test, Y_train_flat, Y_test_flat, shared_meta, scaler
+    # --- Reshape for Conv1D input ---
+    # Keras-style (steps, features) → here steps=1
+    x_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
+    x_test  = X_test.reshape(X_test.shape[0], 1, X_test.shape[1])
+    steps = x_train.shape[1]
+    features = x_train.shape[2]
+
+    print(f"Prepared data for Conv1D: x_train {x_train.shape}, x_test {x_test.shape}, steps={steps}, features={features}")
+
+    return x_train, x_test, Y_train_flat, Y_test_flat, shared_meta, scaler
 
 
-# # Load configuration from config.cfg
-# config = configparser.ConfigParser()
-# config.read('Triton_Lite_Ornl/tritonlite_sugar_creek.cfg')
 
-# # Extract variables from config
-# columns = config['Columns']['columns_to_keep'].split(',')
+# --------------------- data (calls your loader) ---------------------
+def get_data_from_cfg(cfg_path: str, 
+                      train_sets: List[str], 
+                      test_set: str):
+    """
+    Reads the same .cfg you already used and calls load_tritonlite_data.
+    Adjust only the TRAIN/TEST slices and blocks here for quick CPU tests.
+    """
+    config = configparser.ConfigParser()
+    config.read(cfg_path)
 
-# # columns = ['Time (hr)'] + [f'Loc{i}' for i in range(146, 156)]
-# train_sets = [f"D{i:03d}" for i in range(1, 2) if f"D{i:03d}" != "D004"]
-# test_set = "D004"
+    ws_dir = config['Paths']['workspace_dir']
+    base_dir = Path(f"{ws_dir}/{config['Paths']['base_dir']}")
+    hyg_dir  = Path(f"{ws_dir}/{config['Paths']['hyg_dir']}")
+    blocks   = int(config['block']['block_no'])
+    threshold = float(config['Settings'].get('threshold', 0.1))
+    columns = config['Columns']['columns_to_keep'].split(',') 
 
-# X_tr, X_te, Y_tr, Y_te, meta, scaler = load_tritonlite_data(
-#     base_dir="Shared_from_Sudershan/data/Block_tiffs",
-#     hyg_csv="Shared_from_Sudershan/data/Processed_30min/interpolated_data_processed_data_D001.csv",
-#     train_sets=train_sets,
-#     test_set=test_set,
-#     blocks=5,
-#     threshold=0.1,
-#     columns_to_keep=columns,
-#     train_row_slice=slice(0, 480),
-#     test_row_slice=slice(0, None),
-# )
-
-# print("X_tr:", X_tr.shape, "Y_tr:", Y_tr.shape)
-# print("X_te:", X_te.shape, "Y_te:", Y_te.shape)
-# print("meta:", meta)
+    X_tr, X_te, Y_tr, Y_te, meta, scaler = load_tritonlite_data(
+        base_dir=base_dir,
+        hyg_dir=hyg_dir,
+        train_sets=train_sets,
+        test_set=test_set,
+        blocks=blocks,
+        threshold=threshold,
+        columns_to_keep=columns
+        # train_row_slice=train_slice,
+        # test_row_slice=test_slice,
+    )
+    return X_tr, Y_tr, X_te, Y_te, meta, scaler

@@ -1,11 +1,12 @@
 # Triton Surrogate Modeling
 
 This repository contains a **PyTorch reimplementation** of the Triton surrogate model pipeline for flood inundation modeling (Sugar Creek case study).  
-It replaces the original TensorFlow/Keras prototype with a modular, professional workflow that supports **data loading, hyperparameter tuning, training, and prediction/export**.
+The workflow supports **data preprocessing, hyperparameter tuning, training, and prediction/export**.
 
 ## Repository Structure
 
 ```text
+├── data_preprocessing/ # prepare data from Triton output
 ├── data_loader.py # Loads rasters (targets) + tabular CSV (features), handles scaling
 ├── tuning.py # Runs Optuna-based hyperparameter tuning
 ├── train.py # Trains model with best params (or defaults), saves checkpoint
@@ -49,23 +50,7 @@ This includes:
 
 Make sure your data directory structure matches the expected layout.
 
-2. Data Loading
-
-```bash
-python data_loader.py
-```
-
-This will:
-
-- Load training/test rasters
-
-- Load tabular features
-
-- Scale features with StandardScaler (fit on train only)
-
-- Print shapes and metadata
-
-3. Hyperparameter Tuning
+2. Hyperparameter Tuning
 
 Run random search with Optuna pruning:
 
@@ -79,7 +64,7 @@ python tuning.py
 
 - Saves best config to artifacts/best_config.yaml
 
-4. Training
+3. Training
 
 Train with tuned params (if available) or defaults:
 
@@ -87,7 +72,7 @@ Train with tuned params (if available) or defaults:
 python train.py
 ```
 
-5. Prediction & Export
+4. Prediction & Export
 
 Run inference on test set:
 
