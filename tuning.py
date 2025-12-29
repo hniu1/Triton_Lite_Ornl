@@ -103,6 +103,8 @@ def objective(trial: optuna.Trial, X_tr: np.ndarray, Y_tr: np.ndarray, val_ratio
 def main():
     # 1) Load data through your loader (no model involved)
     cfg_path = Path(f"{path_ws}/tritonlite_sugar_creek.cfg")
+
+    # define train/test sets
     test_set   = "D004"
     train_sets = [f"D{i:03d}" for i in range(1, 4) if f"D{i:03d}" != test_set]  # keep small for CPU tuning
 
@@ -158,5 +160,6 @@ def main():
 
 if __name__ == "__main__":
     set_seed(42)
+    # please set your working path here
     path_ws = Path("/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl")
     main()

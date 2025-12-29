@@ -117,8 +117,8 @@ def main():
     cfg = configparser.ConfigParser()
     cfg.read(f"{path_ws}/tritonlite_sugar_creek.cfg")
 
-    base_dir           = cfg['Paths']['base_dir']
-    hyg_csv            = cfg['Paths']['hyg_dir']
+    base_dir           = Path(path_ws) / cfg['Paths']['base_dir']
+    hyg_csv            = Path(path_ws) / cfg['Paths']['hyg_dir']
     out_dir_tritonlite = Path(path_ws) / cfg['Paths']['base_dir_tritonlite']
     out_dir_triton     = Path(path_ws) / cfg['Paths']['base_dir_triton']
     result_dir         = Path(path_ws) / cfg['Paths']['result_dir']
