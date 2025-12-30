@@ -12,7 +12,7 @@ import yaml
 import configparser
 from model import TritonCNN
 
-from data_loader import load_tritonlite_data
+from data_loader import get_data_from_cfg
 
 
 
@@ -115,59 +115,54 @@ def plot_histogram(diff_path: Path, out_png: Path, bins=5, title="Sugar Creek"):
 def main():
     # --- Load configuration (.cfg) ---
     cfg = configparser.ConfigParser()
-    cfg.read(f"{path_ws}/tritonlite_sugar_creek.cfg")
+    cfg.read(cfg_path)
 
     base_dir           = Path(path_ws) / cfg['Paths']['base_dir']
     hyg_csv            = Path(path_ws) / cfg['Paths']['hyg_dir']
     out_dir_tritonlite = Path(path_ws) / cfg['Paths']['base_dir_tritonlite']
     out_dir_triton     = Path(path_ws) / cfg['Paths']['base_dir_triton']
     result_dir         = Path(path_ws) / cfg['Paths']['result_dir']
-    test_set_code      = cfg['Settings']['test_set_code']
     pattern            = "sugar_creek_ACC_{set}_sugar_creek_block_{i}.tif"
     blocks             = int(cfg['block']['block_no'])
     threshold          = float(cfg['Settings'].get('threshold', 0.1))
     columns            = cfg['Columns']['columns_to_keep'].split(',')
 
-    best_yaml = Path(path_ws) / cfg['Training'].get('best_yaml', 'artifacts/best_config.yaml')
-    ckpt_path = Path(path_ws) / cfg['Training'].get('ckpt_path', 'artifacts/best.pt')
+    best_yaml = Path(path_ws) / cfg['Training'].get('best_yaml', 'results/artifacts/best_config.yaml')
+    ckpt_path = Path(path_ws) / cfg['Training'].get('ckpt_path', 'results/artifacts/best.pt')
 
     # --- Load tuned hyperparameters ---
-    if not best_yaml.exists():
-        raise FileNotFoundError(f"Config file not found: {best_yaml}")
-    with open(best_yaml, "r") as f:
-        best_cfg = yaml.safe_load(f)
+    if best_yaml.exists():
+        with open(best_yaml, "r") as f:
+            best_cfg = yaml.safe_load(f)
 
-    # --- Model hyperparameters ---
-    conv1_filters = int(best_cfg["model"]["conv1_filters"])
-    conv2_filters = int(best_cfg["model"]["conv2_filters"])
-    dense1_units  = int(best_cfg["model"]["dense1_units"])
-    dense2_units  = int(best_cfg["model"]["dense2_units"])
-    dense3_units  = int(best_cfg["model"]["dense3_units"])
-    dropout       = float(best_cfg["model"].get("dropout", 0.0))
+        # --- Model hyperparameters ---
+        conv1_filters = int(best_cfg["model"]["conv1_filters"])
+        conv2_filters = int(best_cfg["model"]["conv2_filters"])
+        dense1_units  = int(best_cfg["model"]["dense1_units"])
+        dense2_units  = int(best_cfg["model"]["dense2_units"])
+        dense3_units  = int(best_cfg["model"]["dense3_units"])
+        dropout       = float(best_cfg["model"].get("dropout", 0.0))
+        print(f"[Config] Loaded tuned CNN parameters from {best_yaml}")
+    else:
+        print(f"[warn] best config yaml not found at {best_yaml}; cannot load model hyperparameters.")
+        conv1_filters = 32
+        conv2_filters = 128
+        dense1_units  = 16
+        dense2_units  = 128
+        dense3_units  = 512
+        dropout       = 0.1
 
-    print(f"[Config] Loaded tuned CNN parameters from {best_yaml}")
+        print("[Config] Using default CNN training params")
 
     # --- Load checkpoint ---
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
     ckpt = torch.load(ckpt_path, map_location="cpu")
 
-    # --- Load data (test set only, but function returns both) ---
-    train_sets = [f"D{i:03d}" for i in range(1, 2) if f"D{i:03d}" != "D004"]
-    train_slice = slice(0, 480)
-    test_slice  = slice(0, None)
+    X_tr, Y_tr, X_te, Y_te, meta, _ = get_data_from_cfg(cfg_path, train_sets=train_sets, test_set=test_set)
+    print(f"[Data] X_te={X_te.shape}, Y_te={Y_te.shape}")
 
-    X_tr, X_te, Y_tr, Y_te, meta, _ = load_tritonlite_data(
-        base_dir=base_dir,
-        hyg_csv=hyg_csv,
-        train_sets=train_sets,
-        test_set=test_set_code,
-        blocks=blocks,
-        threshold=threshold,
-        columns_to_keep=columns,
-        train_row_slice=train_slice,
-        test_row_slice=test_slice,
-    )
+
 
     # --- Determine data dimensions ---
     in_features = X_te.shape[-1]
@@ -200,12 +195,11 @@ def main():
     print("[Model] Loaded trained CNN checkpoint successfully.")
 
     # --- Predict on test ---
-    X_te_t = torch.from_numpy(X_te).float()  # ensure float32 tensor
+    x_test = torch.from_numpy(X_te).float()  # ensure float32 tensor
 
     with torch.no_grad():
-        preds_t = model(X_te_t)
-        Y_pred_flat = preds_t.cpu().numpy().astype(np.float32)  # shape [N, out_dim]
-
+        y_predict = model(x_test)
+        Y_pred_flat = y_predict.cpu().numpy().astype(np.float32)  # shape [N, out_dim]
     print(f"[Predict] Done. Predicted array shape: {Y_pred_flat.shape}")
 
     # --- Split predictions into blocks and reshape to [bands, H, W] ---
@@ -213,7 +207,7 @@ def main():
     # However, here they are [samples, out_dim]; reshape logic must match your meta info.
     def split_and_reshape(Y_flat: np.ndarray):
         """Split flat [bands, n_blocks*H*W] predictions into per-block 3D arrays [bands,H,W]."""
-        parts = np.array_split(Y_flat, blocks, axis=0)  # list of [subset, out_dim]
+        parts = np.array_split(Y_flat, blocks, axis=1)  # list of [subset, out_dim]
         reshaped = []
         for p in parts:
             # Flatten band dimension if needed (each block = bands × H × W)
@@ -232,7 +226,7 @@ def main():
     print(f"[Post] Split into {len(pred_blocks)} blocks of size {bands}×{H}×{W}")
 
     # --- Write block GeoTIFFs using original block metadata as template ---
-    test_block_paths = list_block_paths(base_dir, test_set_code, blocks, pattern)
+    test_block_paths = list_block_paths(base_dir, test_set, blocks, pattern)
     if len(test_block_paths) != blocks:
         print(f"[warn] exporter sees {len(test_block_paths)} existing blocks; loader used {blocks}")
 
@@ -245,12 +239,12 @@ def main():
         tpl = test_block_paths[i][1] if i < len(test_block_paths) else test_block_paths[0][1]
 
         # Prediction output
-        out_pred = out_dir_tritonlite / f"{test_set_code}_block_{i:03d}_pred.tif"
+        out_pred = out_dir_tritonlite / f"{test_set}_block_{i:03d}_pred.tif"
         write_block_tif(tpl, pred_blocks[i], out_pred)
 
         # Ground truth output (optional)
         if gt_blocks:
-            out_gt = out_dir_triton / f"{test_set_code}_block_{i:03d}_gt.tif"
+            out_gt = out_dir_triton / f"{test_set}_block_{i:03d}_gt.tif"
             write_block_tif(tpl, gt_blocks[i], out_gt)
 
     print(f"[Export] Wrote {len(pred_blocks)} prediction blocks to {out_dir_tritonlite}")
@@ -295,4 +289,9 @@ def main():
 
 if __name__ == "__main__":
     path_ws = "/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl"
+
+    cfg_path = f"{path_ws}/tritonlite_sugar_creek.cfg"
+    test_set   = "D004"
+    train_sets = [f"D{i:03d}" for i in range(1, 3) if f"D{i:03d}" != test_set]  # keep small for CPU tuning
+
     main()

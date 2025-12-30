@@ -7,3 +7,5 @@ results/
 shapefiles/
 shapefiles/blocks_*
 shapefiles/MOM_raster_*
+01_train.sh
+slurm_output/

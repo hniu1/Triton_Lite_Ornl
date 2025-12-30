@@ -23,18 +23,15 @@ def mse(a: torch.Tensor, b: torch.Tensor) -> float:
 # --------------------- main train ---------------------
 def main():
     set_seed(42)
-    Path(f"{path_ws}/artifacts").mkdir(exist_ok=True)
+    Path(f"{path_ws}/results/artifacts").mkdir(exist_ok=True)
 
     # 1) Load data
-    cfg_path = f"{path_ws}/tritonlite_sugar_creek.cfg"
-    test_set   = "D040"
-    train_sets = [f"D{i:03d}" for i in range(1, 41) if f"D{i:03d}" != test_set]  # keep small for CPU tuning
-
+    
     X_tr, Y_tr, X_te, Y_te, _, _ = get_data_from_cfg(cfg_path, train_sets=train_sets, test_set=test_set)
     print(f"[Data] X_tr={X_tr.shape}, Y_tr={Y_tr.shape} | X_te={X_te.shape}, Y_te={Y_te.shape}")
 
     # 2) Load tuned config if present, else defaults
-    best_cfg_path = Path(f"{path_ws}/artifacts/best_config.yaml")
+    best_cfg_path = Path(f"{path_ws}/results/artifacts/best_config.yaml")
     if best_cfg_path.exists():
         with open(best_cfg_path, "r") as f:
             best_cfg = yaml.safe_load(f)
@@ -60,8 +57,8 @@ def main():
         # --- Default fallback values (reasonable for CNN) ---
         conv1_filters = 32
         conv2_filters = 128
-        dense1_units  = 64
-        dense2_units  = 256
+        dense1_units  = 16
+        dense2_units  = 128
         dense3_units  = 512
         dropout       = 0.1
 
@@ -101,7 +98,7 @@ def main():
 
     # 5) Train with early stopping
     best_val = float("inf"); patience = 0
-    ckpt_path = f"{path_ws}/artifacts/best.pt"
+    ckpt_path = f"{path_ws}/results/artifacts/best.pt"
 
     for epoch in range(1, max_epochs + 1):
         model.train()
@@ -164,4 +161,8 @@ def main():
 
 if __name__ == "__main__":
     path_ws = Path("/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl")
+    cfg_path = f"{path_ws}/tritonlite_sugar_creek.cfg"
+    test_set   = "D040"
+    train_sets = [f"D{i:03d}" for i in range(1, 41) if f"D{i:03d}" != test_set]  # keep small for CPU tuning
+
     main()
