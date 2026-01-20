@@ -18,10 +18,15 @@ from data_loader import get_data_from_cfg
 
 
 # --------------------- Utility functions ---------------------
-def list_block_paths(base_dir: str, set_code: str, blocks: int, pattern: str):
+def list_block_paths(
+        base_dir: str, 
+        set_code: str, 
+        blocks: int, 
+        pattern: str,
+        watershed_name_lower: str):
     paths = []
     for i in range(blocks):
-        p = Path(base_dir) / pattern.format(set=set_code, i=i)
+        p = Path(base_dir) / pattern.format(watershed_name_lower=watershed_name_lower, set=set_code, i=i)
         if p.exists(): paths.append((i, p))
     return paths
 
@@ -117,18 +122,15 @@ def main():
     cfg = configparser.ConfigParser()
     cfg.read(cfg_path)
 
-    base_dir           = Path(path_ws) / cfg['Paths']['base_dir']
-    hyg_csv            = Path(path_ws) / cfg['Paths']['hyg_dir']
-    out_dir_tritonlite = Path(path_ws) / cfg['Paths']['base_dir_tritonlite']
-    out_dir_triton     = Path(path_ws) / cfg['Paths']['base_dir_triton']
-    result_dir         = Path(path_ws) / cfg['Paths']['result_dir']
-    pattern            = "sugar_creek_ACC_{set}_sugar_creek_block_{i}.tif"
+    base_dir           = Path(f"{path_ws}/{cfg['Paths']['base_dir']}_{watershed_name_lower}")
+    out_dir_tritonlite = Path(path_ws) / f'results_{watershed_name_lower}' / cfg['Paths']['base_dir_tritonlite']
+    out_dir_triton     = Path(path_ws) / f'results_{watershed_name_lower}' / cfg['Paths']['base_dir_triton']
+    result_dir         = Path(path_ws) / f'results_{watershed_name_lower}' / cfg['Paths']['result_dir']
+    pattern            = "{watershed_name_lower}_ACC_{set}_{watershed_name_lower}_block_{i}.tif"
     blocks             = int(cfg['block']['block_no'])
-    threshold          = float(cfg['Settings'].get('threshold', 0.1))
-    columns            = cfg['Columns']['columns_to_keep'].split(',')
 
-    best_yaml = Path(path_ws) / cfg['Training'].get('best_yaml', 'results/artifacts/best_config.yaml')
-    ckpt_path = Path(path_ws) / cfg['Training'].get('ckpt_path', 'results/artifacts/best.pt')
+    best_yaml = Path(path_ws) / cfg['Training'].get('best_yaml', f'results_{watershed_name_lower}/artifacts/best_config.yaml')
+    ckpt_path = Path(path_ws) / cfg['Training'].get('ckpt_path', f'results_{watershed_name_lower}/artifacts/best.pt')
 
     # --- Load tuned hyperparameters ---
     if best_yaml.exists():
@@ -145,11 +147,17 @@ def main():
         print(f"[Config] Loaded tuned CNN parameters from {best_yaml}")
     else:
         print(f"[warn] best config yaml not found at {best_yaml}; cannot load model hyperparameters.")
-        conv1_filters = 32
-        conv2_filters = 128
-        dense1_units  = 16
-        dense2_units  = 128
-        dense3_units  = 512
+        config = configparser.ConfigParser()
+        config.read(cfg_path)
+        conv1_filters, conv2_filters = map(
+            int,
+            config['Model']['conv_filters'].split(',')
+        )
+        dense1_units, dense2_units, dense3_units = map(
+            int,
+            config['Model']['dense_units'].split(',')
+        )
+
         dropout       = 0.1
 
         print("[Config] Using default CNN training params")
@@ -226,7 +234,7 @@ def main():
     print(f"[Post] Split into {len(pred_blocks)} blocks of size {bands}×{H}×{W}")
 
     # --- Write block GeoTIFFs using original block metadata as template ---
-    test_block_paths = list_block_paths(base_dir, test_set, blocks, pattern)
+    test_block_paths = list_block_paths(base_dir, test_set, blocks, pattern, watershed_name_lower)
     if len(test_block_paths) != blocks:
         print(f"[warn] exporter sees {len(test_block_paths)} existing blocks; loader used {blocks}")
 
@@ -289,8 +297,10 @@ def main():
 
 if __name__ == "__main__":
     path_ws = "/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl"
+    watershed_name = 'Sugar Creek'
+    watershed_name_lower = watershed_name.replace(" ", "_").lower()
 
-    cfg_path = f"{path_ws}/tritonlite_sugar_creek.cfg"
+    cfg_path = f"{path_ws}/tritonlite_{watershed_name_lower}.cfg"
     test_set   = "D004"
     train_sets = [f"D{i:03d}" for i in range(1, 3) if f"D{i:03d}" != test_set]  # keep small for CPU tuning
 

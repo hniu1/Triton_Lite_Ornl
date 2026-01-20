@@ -1,4 +1,5 @@
 # train.py
+import configparser
 from pathlib import Path
 import yaml
 import numpy as np
@@ -23,7 +24,9 @@ def mse(a: torch.Tensor, b: torch.Tensor) -> float:
 # --------------------- main train ---------------------
 def main():
     set_seed(42)
-    Path(f"{path_ws}/results/artifacts").mkdir(exist_ok=True)
+    path_results = Path(f"{path_ws}/results_{watershed_name_lower}")
+    path_results.mkdir(exist_ok=True)
+    Path(f"{path_results}/artifacts").mkdir(exist_ok=True)
 
     # 1) Load data
     
@@ -31,7 +34,7 @@ def main():
     print(f"[Data] X_tr={X_tr.shape}, Y_tr={Y_tr.shape} | X_te={X_te.shape}, Y_te={Y_te.shape}")
 
     # 2) Load tuned config if present, else defaults
-    best_cfg_path = Path(f"{path_ws}/results/artifacts/best_config.yaml")
+    best_cfg_path = Path(f"{path_results}/artifacts/best_config.yaml")
     if best_cfg_path.exists():
         with open(best_cfg_path, "r") as f:
             best_cfg = yaml.safe_load(f)
@@ -55,18 +58,23 @@ def main():
 
     else:
         # --- Default fallback values (reasonable for CNN) ---
-        conv1_filters = 32
-        conv2_filters = 128
-        dense1_units  = 16
-        dense2_units  = 128
-        dense3_units  = 512
+
+        conv1_filters, conv2_filters = map(
+            int,
+            config['Model']['conv_filters'].split(',')
+        )
+        dense1_units, dense2_units, dense3_units = map(
+            int,
+            config['Model']['dense_units'].split(',')
+        )
+
         dropout       = 0.1
 
-        lr         = 1e-3
-        batch_sz   = 128
-        max_epochs = 100
-        val_ratio  = 0.1
-        es_patience = 10
+        lr         = config['Training'].getfloat('learning_rate', 0.001)
+        batch_sz   = config['Training'].getint('batch_size', 128)
+        max_epochs = config['Training'].getint('epochs', 50)
+        val_ratio  = config['Training'].getfloat('validation_split', 0.1)
+        es_patience = config['EarlyStopping'].getint('patience', 10)
 
         print("[Config] Using default CNN training params")
 
@@ -98,7 +106,7 @@ def main():
 
     # 5) Train with early stopping
     best_val = float("inf"); patience = 0
-    ckpt_path = f"{path_ws}/results/artifacts/best.pt"
+    ckpt_path = f"{path_results}/artifacts/best.pt"
 
     for epoch in range(1, max_epochs + 1):
         model.train()
@@ -160,8 +168,15 @@ def main():
     # Next steps (later): reshape predictions back to [bands, H, W] per block and export GeoTIFFs.
 
 if __name__ == "__main__":
+    watershed_name = 'Sugar Creek'
+    watershed_name_lower = watershed_name.replace(" ", "_").lower()
+
     path_ws = Path("/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl")
-    cfg_path = f"{path_ws}/tritonlite_sugar_creek.cfg"
+    cfg_path = f"{path_ws}/tritonlite_{watershed_name_lower}.cfg"
+
+    config = configparser.ConfigParser()
+    config.read(cfg_path)
+    
     test_set   = "D040"
     train_sets = [f"D{i:03d}" for i in range(1, 41) if f"D{i:03d}" != test_set]  # keep small for CPU tuning
 

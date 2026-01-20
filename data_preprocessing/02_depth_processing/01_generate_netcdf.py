@@ -13,7 +13,10 @@ import numpy as np
 import netCDF4 as nc4
 from datetime import datetime, timezone, timedelta
 
+from pathlib import Path
 
+script_path = Path(__file__).parent.resolve()
+os.chdir(script_path)
 # ---------------------------------------------------------------------
 # Utility Functions
 # ---------------------------------------------------------------------
@@ -31,7 +34,9 @@ def unzip_selected(zip_path, output_path, output_type):
 
 def get_output_files(dat_path, output_type):
     """Return sorted list of binary output files."""
-    files = sorted(glob.glob(os.path.join(dat_path, f"D00*/output/flood2d/bin/{output_type}*")), key=len)
+    files = sorted(
+        glob.glob(os.path.join(dat_path, "*", "output", "flood2d", "bin", f"{output_type}*.dat"))
+    )
     print(f"Found {len(files)} output files.")
     return files
 
@@ -96,7 +101,7 @@ def process_depth_data(zip_path, base_out_dir, output_type, nc_name,
                        cols, rows, gt, ref_time, time_origin):
     start_time = time.time()
     dat_path = os.path.join(base_out_dir, "temp_bin")
-    nc_path = os.path.join(base_out_dir, 'nc')
+    nc_path = base_out_dir
 
     print(f"\n[1/5] Extracting {output_type}*.dat from {zip_path}")
     unzip_selected(zip_path, dat_path, output_type)
@@ -254,7 +259,10 @@ if __name__ == "__main__":
     # ---------------------------------------------------------------------
     # Loop through all ZIPs matching D*.zip
     # ---------------------------------------------------------------------
-    zip_files = sorted(glob.glob(os.path.join(zip_dir, "D*.zip")))
+    zip_files = sorted(
+        z for z in glob.glob(os.path.join(zip_dir, "D*.zip"))
+        if int(os.path.basename(z)[1:4]) >= 27
+    )
     print(f"Found {len(zip_files)} zip files to process.")
 
     for zip_path in zip_files:

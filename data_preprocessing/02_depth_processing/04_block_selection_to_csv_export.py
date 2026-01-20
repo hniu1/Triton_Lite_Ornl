@@ -9,7 +9,7 @@ import os
 from shapely.geometry import Point
 
 # Reading the configuration file
-config_path = r'/lustre/orion/proj-shared/cli138/7hn/triton/ttu/01_Data_Preprocessing/002_TRITONLITE_input_data_processing/directories.cfg'
+config_path = r'./directories.cfg'
 
 config = configparser.ConfigParser()
 config.read(config_path)  # Make sure this path is correct

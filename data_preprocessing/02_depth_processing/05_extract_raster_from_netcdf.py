@@ -3,12 +3,19 @@ from rasterio.mask import mask
 import geopandas as gpd
 import os
 import configparser
+from pathlib import Path
+from shapely.geometry import box
 
+
+script_path = Path(__file__).parent.resolve()
+os.chdir(script_path)
 
 # Base directory and file format
+watershed_name = 'Sugar Creek'  # Example watershed name
+watershed_name_lower = watershed_name.replace(" ", "_").lower()
 
 # Reading the configuration file
-config_path = r'/lustre/orion/proj-shared/cli138/7hn/triton/ttu/01_Data_Preprocessing/002_TRITONLITE_input_data_processing/directories.cfg'
+config_path = 'directories.cfg'
 
 config = configparser.ConfigParser()
 config.read(config_path)  # Make sure this path is correct
@@ -17,10 +24,8 @@ base_dir = config.get('Directories', 'NetCDFInputDir')
 shapefile_path = config.get('Directories', 'shapefile_path')
 output_dir = config.get('Directories', 'water_depth_rasters')
 
-os.makedirs(output_dir, exist_ok=True)
-
-watershed_name = 'Sugar Creek'  # Example watershed name
-watershed_name_lower = watershed_name.replace(" ", "_").lower()
+output_dir = f'{output_dir}_{watershed_name_lower}'
+os.makedirs(f'{output_dir}', exist_ok=True)
 
 # Load the shapefile using GeoPandas
 shapes_all = gpd.read_file(shapefile_path)
@@ -35,7 +40,12 @@ for i in range(1, 41):
         netcdf_file_name = f'D{i:03d}_ACC_future.nc'
         netcdf_file_path = os.path.join(base_dir, netcdf_file_name)
         output_tiff_name = f'ACC_D{i:03d}_{watershed_name_lower}.tif'
-        output_tiff_path = os.path.join(output_dir, output_tiff_name)
+        output_tiff_path = os.path.join(f'{output_dir}', output_tiff_name)
+
+        # # if file exists, skip
+        # if os.path.exists(output_tiff_path):
+        #     print(f"File {output_tiff_path} already exists. Skipping...")
+        #     continue
 
         # Open the NetCDF file
         with rasterio.open(netcdf_file_path) as src:

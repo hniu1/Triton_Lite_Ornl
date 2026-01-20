@@ -3,7 +3,7 @@
 ####################################
 
 processed_data/
-results/
+results*
 shapefiles/
 shapefiles/blocks_*
 shapefiles/MOM_raster_*

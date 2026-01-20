@@ -4,11 +4,15 @@ import pandas as pd
 import rasterio
 import os
 import configparser
+from pathlib import Path
+
+script_path = Path(__file__).parent.resolve()
+os.chdir(script_path)
 
 watershed_name = 'Sugar Creek'
 watershed_name_lower = watershed_name.replace(" ", "_").lower()
 
-config_path = r'/lustre/orion/proj-shared/cli138/7hn/triton/ttu/01_Data_Preprocessing/002_TRITONLITE_input_data_processing/directories.cfg'
+config_path = r'./directories.cfg'
 
 config = configparser.ConfigParser()
 config.read(config_path)  # Make sure this path is correct
@@ -16,13 +20,10 @@ config.read(config_path)  # Make sure this path is correct
 base_dir = config.get('Directories', 'NetCDFInputDir')
 
 # Base path to your TIFF and CSV files
-full_ras_path = config.get('Directories', 'water_depth_rasters')
-
-watershed_name = 'Sugar Creek'  # Example watershed name
-watershed_name_lower = watershed_name.replace(" ", "_").lower()
+full_ras_path = config.get('Directories', 'water_depth_rasters')+f'_{watershed_name_lower}'
 
 csv_file = config.get('Directories', 'csv_file_path')
-out_folder_chunk = config.get('Directories', 'out_folder_tiff')
+out_folder_chunk = config.get('Directories', 'out_folder_tiff')+f'_{watershed_name_lower}'
 
 # Ensure the output directory exists
 os.makedirs(out_folder_chunk, exist_ok=True)

@@ -12,14 +12,15 @@ def _load_set_stack(
     set_code: str,
     blocks: int,
     threshold: float,
-    pattern: str = "sugar_creek_ACC_{set}_sugar_creek_block_{i}.tif",
+    pattern: str,
+    watershed_name_lower: str
 ) -> Tuple[np.ndarray, Dict]:
     """Load one set -> hstack blocks -> threshold -> [bands, blocks*H*W]."""
     base = Path(base_dir)
     per_block = []
     bands = h = w = None
     for i in range(blocks):
-        fp = base / pattern.format(set=set_code, i=i)
+        fp = base / pattern.format(watershed_name_lower=watershed_name_lower, set=set_code, i=i)
         if not fp.exists():
             # skip missing blocks
             continue
@@ -46,7 +47,8 @@ def load_tritonlite_data(
     columns_to_keep: List[str] = None,
     # train_row_slice: slice = slice(0, 18240),
     # test_row_slice: slice = slice(18240, None),
-    pattern: str = "sugar_creek_ACC_{set}_sugar_creek_block_{i}.tif",
+    watershed_name_lower: str = "unknown_watershed",
+    pattern: str = "{watershed_name_lower}_ACC_{set}_{watershed_name_lower}_block_{i}.tif",
 ):
     """
     Returns:
@@ -61,7 +63,7 @@ def load_tritonlite_data(
     Y_train_list = []
     shared_meta = None
     for s in train_sets:
-        Y_set, meta = _load_set_stack(base_dir, s, blocks, threshold, pattern)
+        Y_set, meta = _load_set_stack(base_dir, s, blocks, threshold, pattern, watershed_name_lower)
         if shared_meta is None:
             shared_meta = meta
         else:
@@ -74,7 +76,7 @@ def load_tritonlite_data(
         raise RuntimeError("No training data found.")
 
     Y_train = np.vstack(Y_train_list)
-    Y_test, _ = _load_set_stack(base_dir, test_set, blocks, threshold, pattern)
+    Y_test, _ = _load_set_stack(base_dir, test_set, blocks, threshold, pattern, watershed_name_lower)
 
     # Flatten targets
     Y_train_flat = Y_train.reshape(Y_train.shape[0], -1).astype(np.float32)
@@ -133,8 +135,14 @@ def get_data_from_cfg(cfg_path: str,
     config = configparser.ConfigParser()
     config.read(cfg_path)
 
+    watershed_name = config['Paths'].get('watershed_name', 'unknown_watershed')
+    if watershed_name == 'unknown_watershed':
+        raise ValueError("watershed_name must be specified in the config file under [Paths].")
+    else:
+        print(f"Using watershed: {watershed_name}")
+    watershed_name_lower = watershed_name.replace(" ", "_").lower()
     ws_dir = config['Paths']['workspace_dir']
-    base_dir = Path(f"{ws_dir}/{config['Paths']['base_dir']}")
+    base_dir = Path(f"{ws_dir}/{config['Paths']['base_dir']}_{watershed_name_lower}")
     hyg_dir  = Path(f"{ws_dir}/{config['Paths']['hyg_dir']}")
     blocks   = int(config['block']['block_no'])
     threshold = float(config['Settings'].get('threshold', 0.1))
@@ -147,8 +155,9 @@ def get_data_from_cfg(cfg_path: str,
         test_set=test_set,
         blocks=blocks,
         threshold=threshold,
-        columns_to_keep=columns
+        columns_to_keep=columns,
         # train_row_slice=train_slice,
         # test_row_slice=test_slice,
+        watershed_name_lower=watershed_name_lower
     )
     return X_tr, Y_tr, X_te, Y_te, meta, scaler
