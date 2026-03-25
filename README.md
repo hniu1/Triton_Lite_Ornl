@@ -1,173 +1,215 @@
-# Triton Surrogate Modeling
+# Triton Lite Block-wise Surrogate
 
-This repository contains a **PyTorch reimplementation** of the Triton surrogate model pipeline for flood inundation modeling (Sugar Creek case study).  
-The workflow supports **data preprocessing, hyperparameter tuning, training, and prediction/export**.
+This repository now centers on a block-wise flood-depth surrogate for Triton Lite.
+The active workflow is:
 
-## Repository Structure
+- build event tensors from hydrologic inputs
+- build static block metadata/features
+- build block-wise labels from depth netCDF outputs
+- train one shared model that predicts flood depth for one block at a time
+
+The older watershed-level training, tuning, and prediction scripts have been removed.
+
+## Active Files
 
 ```text
-├── data_preprocessing/ # prepare data from Triton output
-├── data_loader.py # Loads rasters (targets) + tabular CSV (features), handles scaling
-├── tuning.py # Runs Optuna-based hyperparameter tuning
-├── train.py # Trains model with best params (or defaults), saves checkpoint
-├── predict.py # Runs inference, exports GeoTIFFs, mosaics, metrics, histogram
-├── tritonlite_sugar_creek.cfg # Config file with paths, columns, settings
-└── artifacts/ # Saved configs, checkpoints, outputs
+├── data_preprocessing/
+│   ├── m0_generate_netcdf_from_zip.py
+│   ├── m1a_build_event_sources.py
+│   ├── m1b_event_to_tensor.py
+│   ├── m2_block_feature_extraction.py
+│   ├── m3_construct_labels_from_netcdf.py
+│   ├── README_m1_events.md
+│   ├── README_m2_blocks.md
+│   └── README_m3_labels_from_netcdf.md
+├── blockwise_data.py                       # joins events/blocks/labels and builds datasets
+├── blockwise_model.py                      # temporal encoder + block encoder + predictor
+├── tune_blockwise.py                       # tunes block-wise hyperparameters
+├── train_blockwise.py                      # trains the block-wise depth model
+├── predict_blockwise.py                    # predicts block-wise depth from a trained model
+├── model.py                               # retained legacy watershed model definition
+├── data_loader.py                         # retained legacy watershed data loader
+└── README.md
 ```
 
-## ⚙️ Requirements
+## Current Training Target
 
-- Python 3.9+
-- PyTorch >= 2.0  
-- Optuna (for hyperparameter tuning)  
-- scikit-learn  
-- rasterio  
-- matplotlib  
-- numpy, pandas, PyYAML, configparser  
+Each supervised sample is one `(event_id, watershed_id, block_id)` row:
 
-Install with:
+- `X_event`: event time series from Milestone 1, stored as `X_event.npy` with shape `T x F`
+- `X_block`: static block features from Milestone 2
+- `y`: peak flood depth for that block from Milestone 3
+
+The model architecture matches the current design direction:
+
+- temporal encoder over the hydrologic event time series
+- block encoder over static block metadata
+- late fusion
+- scalar flood-depth prediction for one block
+
+## Requirements
+
+The active code path requires:
+
+- Python with `numpy`, `pandas`, `scikit-learn`, and `torch`
+- `pyarrow` or `fastparquet` for parquet I/O
+- geospatial dependencies for preprocessing scripts, including `geopandas`, `rasterio`, and `shapely`
+
+Example install:
 
 ```bash
-pip install torch optuna scikit-learn rasterio matplotlib numpy pandas pyyaml
+pip install numpy pandas scikit-learn torch pyarrow geopandas rasterio shapely
 ```
 
-## Data Preprocessing
-The data_preprocessing directory contains all scripts and configuration files required to transform raw hydrologic and depth-related data into machine-learning–ready inputs and outputs for the Triton / Triton-Lite surrogate modeling workflow. The preprocessing pipeline is organized into two main stages:
+## Data Processing
 
-- HYG processing: preparation of input features (X)
+The supported preprocessing flow is under [data_preprocessing](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing).
 
-- Depth processing: preparation of target variables (Y)
+### Milestone 1: Event Tensors
 
-1. 01_hyg_processing: Input Feature Preparation (X)
+Use:
 
-This folder handles preprocessing of HYG time-series data, which serve as model inputs. Each HYG file corresponds to a hydrologic event and contains temporally ordered measurements that are converted into uniform, high-resolution input sequences.
+- `m1a_build_event_sources.py`
+- `m1b_event_to_tensor.py`
 
-- 01_extract_hyg_from_zipfiles.py: Extracts raw HYG files from ZIP archives.
+Outputs:
 
-- 02_convert_hyg_3hrs_to_30mins_t.py: Converts HYG time series from 3-hour intervals to 30-minute intervals.
+- `events.csv`
+- `events/<watershed_id>/<event_id>/X_event.npy`
 
-- convert_hyg_3hrs_to_30mins.cfg: Configuration file controlling temporal conversion parameters.
+Reference docs:
+
+- [README_m1_events.md](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing/README_m1_events.md)
+
+### Milestone 2: Block Features
+
+Use:
+
+- `m2_block_feature_extraction.py`
 
 Output:
-Cleaned and temporally standardized HYG time series used as model inputs (X).
 
-2. 02_depth_processing: Target Variable Preparation (Y)
+- `blocks.parquet`
 
-This folder prepares depth-related outputs used as supervised learning targets. Processing focuses on converting event-level depth simulations into spatially organized, block-level representations suitable for regression or surrogate modeling.
+Reference docs:
 
-Contents:
+- [README_m2_blocks.md](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing/README_m2_blocks.md)
 
-- 01_generate_netcdf.py
-Generates NetCDF files from raw depth simulation outputs.
+### Milestone 3: Block-wise Labels
 
-- 02_conasauga_block_creation.py
-Creates block definitions for the Conasauga (e.g., Sugar Creek) watershed.
+Use:
 
-- 03_netcdf_to_MOM_raster.py
-Converts NetCDF depth data into raster format.
-
-- 04_block_selection_to_csv_export.py
-Aggregates raster data into block-level CSV outputs.
-
-- 05_extract_raster_from_netcdf.py
-Extracts raster layers directly from NetCDF files.
-
-- 06_extract_tiff_from_rasters.py
-Exports GeoTIFF files from raster datasets.
-
-- pair_loc_watershed.py
-Maps spatial locations to their corresponding watershed.
-
-- directories.cfg
-Centralized configuration for input/output directory management.
+- `m0_generate_netcdf_from_zip.py`
+- `m3_construct_labels_from_netcdf.py`
 
 Output:
-Event-aligned, block-level depth data used as model targets (Y).
 
-## Workflow
+- `labels.parquet`
 
-1. Prepare config file
+Reference docs:
 
-All paths and settings are defined in Triton_Lite_Ornl/tritonlite_sugar_creek.cfg.
-This includes:
+- [README_m3_labels_from_netcdf.md](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing/README_m3_labels_from_netcdf.md)
 
-- Paths to raster data (base_dir)
+## Training
 
-- Path to tabular CSV (hyg_dir)
-
-- Output directories
-
-- Number of blocks per set
-
-- Columns to keep (features)
-
-Make sure your data directory structure matches the expected layout.
-
-2. Hyperparameter Tuning
-
-Run random search with Optuna pruning:
+Train the current model with [train_blockwise.py](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/train_blockwise.py):
 
 ```bash
-python tuning.py
+/ccs/home/haoranniu/miniconda3/envs/triton/bin/python train_blockwise.py \
+  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
+  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
+  --labels-parquet processed_data/blockwise_global/milestone_03_labels/labels.parquet \
+  --output-dir results_blockwise \
+  --test-events D040
 ```
 
-- Uses a 10% validation split
+Important behavior:
 
-- Runs 20 trials (default), each with early stopping
+- splitting is done by event, not by individual event-block rows
+- normalization is fit on the training split only
+- outputs include a model checkpoint, split tables, normalization stats, and metrics
 
-- Saves best config to artifacts/best_config.yaml
+### Training Outputs
 
-3. Training
+The training output directory contains:
 
-Train with tuned params (if available) or defaults:
+- `best_model.pt`
+- `metrics.json`
+- `run_config.json`
+- `normalization_stats.npz`
+- `splits/train_samples.csv`
+- `splits/val_samples.csv`
+- `splits/test_samples.csv`
+
+You can also train from a tuned config:
 
 ```bash
-python train.py
+/ccs/home/haoranniu/miniconda3/envs/triton/bin/python train_blockwise.py \
+  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
+  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
+  --labels-parquet processed_data/blockwise_global/milestone_03_labels/labels.parquet \
+  --output-dir results_blockwise_train \
+  --config-json results_blockwise_tuning/best_config.json
 ```
 
-4. Prediction & Export
+## Tuning
 
-Run inference on test set:
+Tune the model with [tune_blockwise.py](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/tune_blockwise.py):
 
 ```bash
-python predict.py
+/ccs/home/haoranniu/miniconda3/envs/triton/bin/python tune_blockwise.py \
+  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
+  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
+  --labels-parquet processed_data/blockwise_global/milestone_03_labels/labels.parquet \
+  --output-dir results_blockwise_tuning \
+  --test-events D040
 ```
 
-- Loads checkpoint (artifacts/best.pt)
+Tuning outputs:
 
-- Predicts flattened targets
+- `best_config.json`
+- `trials.json`
+- `summary.json`
 
-- Splits/reshapes predictions into (bands, H, W) blocks
+The saved `best_config.json` can be passed directly to `train_blockwise.py`.
 
-- Exports GeoTIFFs for each block
+## Prediction
 
-- Builds mosaics
+Run inference with [predict_blockwise.py](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/predict_blockwise.py):
 
-- Computes per-pixel maxima (MOM rasters)
+```bash
+/ccs/home/haoranniu/miniconda3/envs/triton/bin/python predict_blockwise.py \
+  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
+  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
+  --checkpoint results_blockwise_train/best_model.pt \
+  --normalization-stats results_blockwise_train/normalization_stats.npz \
+  --output-parquet results_blockwise_predictions/preds.parquet
+```
 
-- Subtracts GT vs. predictions, writes diff raster
+Optional evaluation against known labels:
 
-- Prints metrics (F2, CSI, RMSE)
+```bash
+/ccs/home/haoranniu/miniconda3/envs/triton/bin/python predict_blockwise.py \
+  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
+  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
+  --checkpoint results_blockwise_train/best_model.pt \
+  --normalization-stats results_blockwise_train/normalization_stats.npz \
+  --labels-parquet processed_data/blockwise_global/milestone_03_labels/labels.parquet \
+  --output-parquet results_blockwise_predictions/preds.parquet
+```
 
-- Saves histogram plot to result_dir
+Prediction outputs:
 
-## Outputs
+- `preds.parquet` with `event_id`, `watershed_id`, `block_id`, and `y_pred`
+- optional `preds.metrics.json` when labels are supplied
 
-1. artifacts/
+## Status
 
-    - best_config.yaml → tuned hyperparams
+Supported now:
 
-    - best.pt → trained model weights
+- block-wise preprocessing through Milestones 1, 2, and 3
+- block-wise training with `train_blockwise.py`
+- block-wise hyperparameter tuning with `tune_blockwise.py`
+- block-wise prediction with `predict_blockwise.py`
 
-2. base_dir_tritonlite/ (from config)
-
-    - Block-level predicted GeoTIFFs
-
-    - Mosaic + MOM rasters
-
-3. result_dir/ (from config)
-
-    - diff_pred_vs_gt.tif → difference raster
-
-    - sugar_creek_histogram.png → histogram plot of differences
-
+The repository now keeps only the active block-wise preprocessing path.

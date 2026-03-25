@@ -44,7 +44,7 @@ Example:
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m0_generate_netcdf_from_zip.py \
+  data_preprocessing/m0_generate_netcdf_from_zip.py \
   --zip-dir /lustre/orion/cli190/world-shared/Conasauga_Paper/DataAndMethods/4GCMFloodSimulations/2_OutputData/0_Simulation_Outputs/2BaseHygs/ACCESS_RegCM_baseline_flood_3hr \
   --zip-pattern 'D*.zip' \
   --output-dir processed_data/blockwise_global/milestone_03_netcdf \
@@ -185,7 +185,7 @@ These validation steps check key coverage, not numeric equivalence to another la
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m3_construct_labels_from_netcdf.py \
+  data_preprocessing/m3_construct_labels_from_netcdf.py \
   --netcdf-dir processed_data/blockwise_global/milestone_03_netcdf \
   --netcdf-pattern 'D*_ACC_future.nc' \
   --blocks-file shapefiles/blocks_conasauga.shp \
@@ -205,7 +205,7 @@ Use `--max-events` and `--max-blocks` to smoke-test the pipeline on a small subs
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m3_construct_labels_from_netcdf.py \
+  data_preprocessing/m3_construct_labels_from_netcdf.py \
   --netcdf-dir processed_data/blockwise_global/milestone_03_netcdf \
   --blocks-file shapefiles/blocks_conasauga.shp \
   --watershed-id conasauga \

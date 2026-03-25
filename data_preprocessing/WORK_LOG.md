@@ -144,7 +144,7 @@ cd /lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m1a_build_event_sources.py \
+  data_preprocessing/m1a_build_event_sources.py \
   --input-dir /lustre/orion/cli190/world-shared/Conasauga_Paper/DataAndMethods/4GCMFloodSimulations/2_OutputData/0_Simulation_Outputs/2BaseHygs/ACCESS_RegCM_baseline_flood_3hr \
   --file-pattern 'D*.zip' \
   --default-watershed-id conasauga \
@@ -157,7 +157,7 @@ cd /lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m1b_event_to_tensor.py \
+  data_preprocessing/m1b_event_to_tensor.py \
   --events-source-csv processed_data/blockwise_global/milestone_01_events_test/events_source.csv \
   --base-dir . \
   --sensor-map-csv processed_data/hyg/loc_watershed.csv \
@@ -174,7 +174,7 @@ cd /lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m1b_event_to_tensor.py \
+  data_preprocessing/m1b_event_to_tensor.py \
   --events-source-csv processed_data/blockwise_global/milestone_01_events_test/events_source.csv \
   --base-dir . \
   --sensor-map-csv processed_data/hyg/loc_watershed.csv \
@@ -189,7 +189,7 @@ cd /lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl
 
 ```bash
 /ccs/home/haoranniu/miniconda3/envs/triton/bin/python \
-  data_preprocessing/03_blockwise_preprocessing/m2_block_feature_extraction.py \
+  data_preprocessing/m2_block_feature_extraction.py \
   --blocks-files shapefiles/blocks_conasauga.shp \
   --blocks-crs EPSG:26916 \
   --dem-raster shapefiles/DEM/D001_dem.tif \
@@ -199,4 +199,3 @@ cd /lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl
   --output-parquet processed_data/blockwise_global/milestone_02_blocks_test/blocks.parquet \
   --log-level INFO
 ```
-

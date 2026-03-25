@@ -69,7 +69,7 @@ If no sensor map is provided, all detected `Loc*` columns are used in each event
 ### Step A: raw zip/txt to event source table
 
 ```bash
-python3 data_preprocessing/03_blockwise_preprocessing/m1a_build_event_sources.py \
+python3 data_preprocessing/m1a_build_event_sources.py \
   --input-dir /path/to/raw_hyg \
   --file-pattern "D*.zip" \
   --default-watershed-id conasauga \
@@ -80,7 +80,7 @@ python3 data_preprocessing/03_blockwise_preprocessing/m1a_build_event_sources.py
 ### Step B: event source table to final tensors (preferred output)
 
 ```bash
-python3 data_preprocessing/03_blockwise_preprocessing/m1b_event_to_tensor.py \
+python3 data_preprocessing/m1b_event_to_tensor.py \
   --events-source-csv processed_data/blockwise_global/m1a_events_source.csv \
   --base-dir . \
   --sensor-map-csv processed_data/hyg/loc_watershed.csv \
@@ -95,7 +95,7 @@ python3 data_preprocessing/03_blockwise_preprocessing/m1b_event_to_tensor.py \
 ### Step B: trim-mode alternative
 
 ```bash
-python3 data_preprocessing/03_blockwise_preprocessing/m1b_event_to_tensor.py \
+python3 data_preprocessing/m1b_event_to_tensor.py \
   --events-source-csv processed_data/blockwise_global/m1a_events_source.csv \
   --base-dir . \
   --time-align-mode trim \

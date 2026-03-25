@@ -124,7 +124,7 @@ If `--outlets-file` is a vector file, it must contain the watershed ID column.
 ## Example
 
 ```bash
-python3 data_preprocessing/03_blockwise_preprocessing/m2_block_feature_extraction.py   --blocks-files shapefiles/blocks_conasauga.shp   --blocks-crs EPSG:26916   --dem-raster shapefiles/DEM/D001_dem.tif   --outlets-file processed_data/blockwise_global/milestone_02_blocks_test/outlets_test.csv   --watershed-id-column watershed_id   --outlets-crs EPSG:26916   --output-parquet processed_data/blockwise_global/milestone_02_blocks_test/blocks.parquet
+python3 data_preprocessing/m2_block_feature_extraction.py   --blocks-files shapefiles/blocks_conasauga.shp   --blocks-crs EPSG:26916   --dem-raster shapefiles/DEM/D001_dem.tif   --outlets-file processed_data/blockwise_global/milestone_02_blocks_test/outlets_test.csv   --watershed-id-column watershed_id   --outlets-crs EPSG:26916   --output-parquet processed_data/blockwise_global/milestone_02_blocks_test/blocks.parquet
 ```
 
 ## Role in the final block-wise model
