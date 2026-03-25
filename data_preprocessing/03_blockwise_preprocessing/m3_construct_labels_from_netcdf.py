@@ -225,6 +225,54 @@ def validate_completeness(labels: pd.DataFrame) -> None:
         raise ValueError("Missing event-block pairs detected:\n" + "\n".join(issues))
 
 
+def validate_against_events(labels: pd.DataFrame, events_csv: Path) -> None:
+    events = pd.read_csv(events_csv)
+    required = {"event_id", "watershed_id"}
+    missing_cols = required - set(events.columns)
+    if missing_cols:
+        raise ValueError(f"events_csv missing required columns: {sorted(missing_cols)}")
+
+    events["event_id"] = events["event_id"].astype(str).str.upper()
+    events["watershed_id"] = events["watershed_id"].astype(str).map(normalize_id)
+
+    events_key = set(events[["watershed_id", "event_id"]].itertuples(index=False, name=None))
+    labels_key = set(labels[["watershed_id", "event_id"]].itertuples(index=False, name=None))
+
+    missing_in_events = labels_key - events_key
+    if missing_in_events:
+        sample = sorted(list(missing_in_events))[:10]
+        raise ValueError(f"labels contain watershed/event not found in events_csv, sample: {sample}")
+
+    missing_in_labels = events_key - labels_key
+    if missing_in_labels:
+        sample = sorted(list(missing_in_labels))[:10]
+        raise ValueError(f"events_csv contains watershed/event not found in labels, sample: {sample}")
+
+
+def validate_against_blocks(labels: pd.DataFrame, blocks_parquet: Path) -> None:
+    blocks = pd.read_parquet(blocks_parquet)
+    required = {"watershed_id", "block_id"}
+    missing_cols = required - set(blocks.columns)
+    if missing_cols:
+        raise ValueError(f"blocks_parquet missing required columns: {sorted(missing_cols)}")
+
+    blocks["watershed_id"] = blocks["watershed_id"].astype(str).map(normalize_id)
+    blocks["block_id"] = blocks["block_id"].astype(str)
+
+    blocks_key = set(blocks[["watershed_id", "block_id"]].itertuples(index=False, name=None))
+    labels_key = set(labels[["watershed_id", "block_id"]].itertuples(index=False, name=None))
+
+    missing_in_blocks = labels_key - blocks_key
+    if missing_in_blocks:
+        sample = sorted(list(missing_in_blocks))[:10]
+        raise ValueError(f"labels contain watershed/block not found in blocks_parquet, sample: {sample}")
+
+    missing_in_labels = blocks_key - labels_key
+    if missing_in_labels:
+        sample = sorted(list(missing_in_labels))[:10]
+        raise ValueError(f"blocks_parquet contains watershed/block not found in labels, sample: {sample}")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Milestone 3: Construct labels.parquet from upstream netCDF outputs")
     parser.add_argument("--netcdf-dir", type=Path, required=True)
@@ -240,6 +288,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-blocks", type=int, default=None)
     parser.add_argument("--drop-nonhydro-blocks", action="store_true")
     parser.add_argument("--hydro-threshold", type=float, default=0.0)
+    parser.add_argument("--events-csv", type=Path, default=None, help="Optional events table for validation")
+    parser.add_argument("--blocks-parquet", type=Path, default=None, help="Optional blocks table for validation")
     parser.add_argument("--output-parquet", type=Path, required=True)
     parser.add_argument("--log-level", type=str, default="INFO")
     return parser
@@ -279,6 +329,15 @@ def main() -> None:
     )
 
     validate_completeness(labels)
+
+    if args.events_csv is not None:
+        validate_against_events(labels, args.events_csv)
+        LOGGER.info("Validated labels against events table: %s", args.events_csv)
+
+    if args.blocks_parquet is not None:
+        validate_against_blocks(labels, args.blocks_parquet)
+        LOGGER.info("Validated labels against blocks table: %s", args.blocks_parquet)
+
     args.output_parquet.parent.mkdir(parents=True, exist_ok=True)
     labels.to_parquet(args.output_parquet, index=False)
     LOGGER.info("Wrote labels.parquet rows=%d -> %s", len(labels), args.output_parquet)

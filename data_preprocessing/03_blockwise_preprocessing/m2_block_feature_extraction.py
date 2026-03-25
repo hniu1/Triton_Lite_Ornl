@@ -104,14 +104,15 @@ def load_blocks(
 
         if block_id_column in frame.columns:
             frame["block_id"] = frame[block_id_column].astype(str)
+            frame["_needs_generated_block_id"] = False
         else:
-            frame = frame.reset_index(drop=True)
-            frame["block_id"] = [f"{wid}_b{i:06d}" for i, wid in enumerate(frame["watershed_id"], start=1)]
+            frame["block_id"] = None
+            frame["_needs_generated_block_id"] = True
 
         if "geometry" not in frame.columns:
             raise ValueError(f"No geometry column found in blocks file: {path}")
 
-        frame = frame[["watershed_id", "block_id", "geometry"]].copy()
+        frame = frame[["watershed_id", "block_id", "geometry", "_needs_generated_block_id"]].copy()
         frame = frame.loc[frame.geometry.notnull()].copy()
         frame = frame.loc[~frame.geometry.is_empty].copy()
 
@@ -119,6 +120,35 @@ def load_blocks(
         LOGGER.info("Loaded %s blocks from %s", len(frame), path)
 
     merged = pd.concat(all_frames, ignore_index=True)
+
+    mixed_watersheds = []
+    for watershed_id, group in merged.groupby("watershed_id", sort=False):
+        needs_generated = bool(group["_needs_generated_block_id"].any())
+        has_existing = bool((~group["_needs_generated_block_id"]).any())
+        if needs_generated and has_existing:
+            mixed_watersheds.append(watershed_id)
+    if mixed_watersheds:
+        raise ValueError(
+            "Some watersheds mix explicit block IDs with generated block IDs. "
+            f"Provide a complete '{block_id_column}' column or omit it consistently. Affected watersheds: {mixed_watersheds}"
+        )
+
+    if bool(merged["_needs_generated_block_id"].any()):
+        generated_index = merged.groupby("watershed_id", sort=False).cumcount() + 1
+        merged.loc[merged["_needs_generated_block_id"], "block_id"] = [
+            f"{wid}_b{idx:06d}"
+            for wid, idx in zip(
+                merged.loc[merged["_needs_generated_block_id"], "watershed_id"],
+                generated_index.loc[merged["_needs_generated_block_id"]],
+            )
+        ]
+
+    duplicates = merged.duplicated(subset=["watershed_id", "block_id"])
+    if bool(duplicates.any()):
+        dup_rows = merged.loc[duplicates, ["watershed_id", "block_id"]].head(10).to_dict("records")
+        raise ValueError(f"Duplicate watershed/block IDs detected in block inputs, sample: {dup_rows}")
+
+    merged = merged[["watershed_id", "block_id", "geometry"]].copy()
     blocks_gdf = gpd.GeoDataFrame(merged, geometry="geometry", crs=all_frames[0].crs)
     return blocks_gdf
 
