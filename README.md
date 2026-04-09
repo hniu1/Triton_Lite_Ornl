@@ -171,3 +171,32 @@ python predict.py
 
     - sugar_creek_histogram.png → histogram plot of differences
 
+
+## Contributing
+
+We welcome contributions!  
+
+1. Fork the repository.  
+2. Create a feature branch:  
+   ```bash
+   git checkout -b feature/my-new-feature
+   ```
+3. Commit your changes and open a Merge Request (MR).  
+
+## License
+
+TRITON-Lite is released under the **3-Clause BSD License**. See the [LICENSE](LICENSE) file for full terms and conditions.
+
+External third-party libraries included or referenced by TRITON retain their own respective licenses, which are provided in the **licenses** subdirectory.
+
+
+
+## Acknowledgments
+
+Development of TRITON-Lite is supported by the U.S. Air Force Numerical Weather Modeling Program. TRITON used resources of the Oak Ridge Leadership Computing Facility at Oak Ridge National Laboratory, a U.S. Department of Energy user facility. Development is led by Oak Ridge National Laboratory, and Tennessee Technological University (Cookeville, TN).
+
+## Contact
+
+Questions, bug reports, or feature requests:
+- Open a GitLab issue: <https://code.ornl.gov/hydro/triton-lite/-/issues>
+- Email: [Haoran Niu](mailto:niuh@ornl.gov), [Sudershan Gangrade](mailto:gangrades@ornl.gov)

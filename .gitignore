@@ -3,6 +3,7 @@
 ####################################
 
 processed_data/
+processed_data_v1/
 results*
 shapefiles/
 shapefiles/blocks_*
