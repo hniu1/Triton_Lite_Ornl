@@ -144,15 +144,39 @@ def build_block_masks(
 
 
 def compute_peak_label_for_block(event_cube: np.ndarray, block_mask: np.ndarray) -> float:
-    subset = event_cube[:, block_mask]
+    subset = event_cube[block_mask]
     if np.ma.isMaskedArray(subset):
         values = np.asarray(subset.compressed(), dtype=np.float32)
     else:
         values = np.asarray(subset, dtype=np.float32).ravel()
         values = values[np.isfinite(values)]
     if values.size == 0:
-        return float("nan")
+        return 0.0
     return float(np.max(values))
+
+
+def compute_event_peak_grid(var: nc4.Variable, time_chunk_size: int = 4) -> np.ndarray:
+    peak_grid: Optional[np.ndarray] = None
+    for time_start in range(0, var.shape[0], time_chunk_size):
+        time_stop = min(var.shape[0], time_start + time_chunk_size)
+        frame = var[time_start:time_stop, :, :]
+        if np.ma.isMaskedArray(frame):
+            frame_values = frame.filled(np.nan).astype(np.float32, copy=False)
+        else:
+            frame_values = np.asarray(frame, dtype=np.float32)
+            frame_values[~np.isfinite(frame_values)] = np.nan
+
+        frame_peak = np.fmax.reduce(frame_values, axis=0)
+
+        if peak_grid is None:
+            peak_grid = frame_peak.copy()
+            continue
+
+        np.fmax(peak_grid, frame_peak, out=peak_grid)
+
+    if peak_grid is None:
+        raise ValueError("Encountered netCDF depth variable with zero timesteps")
+    return peak_grid
 
 
 def construct_labels(
@@ -170,10 +194,14 @@ def construct_labels(
             if depth_var not in ds.variables:
                 raise ValueError(f"Variable '{depth_var}' missing in {nc_path}")
             var = ds.variables[depth_var]
+            peak_grid = compute_event_peak_grid(var)
 
             for mask in masks:
-                cube = var[:, mask.row_off : mask.row_off + mask.height, mask.col_off : mask.col_off + mask.width]
-                y_value = compute_peak_label_for_block(cube, mask.mask)
+                peak_window = peak_grid[
+                    mask.row_off : mask.row_off + mask.height,
+                    mask.col_off : mask.col_off + mask.width,
+                ]
+                y_value = compute_peak_label_for_block(peak_window, mask.mask)
                 rows.append(
                     {
                         "event_id": event_id,

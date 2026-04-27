@@ -111,6 +111,17 @@ def main():
             val_metrics = run_epoch(model, val_loader, None, loss_fn, device)
             history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics})
 
+            print(
+                "trial {trial:03d} epoch {epoch:03d} train_loss={train_loss:.6f} val_loss={val_loss:.6f} val_rmse={val_rmse:.6f}".format(
+                    trial=trial_index,
+                    epoch=epoch,
+                    train_loss=train_metrics["loss"],
+                    val_loss=val_metrics["loss"],
+                    val_rmse=val_metrics["rmse"],
+                ),
+                flush=True,
+            )
+
             if val_metrics["loss"] < trial_best_val - 1e-8:
                 trial_best_val = val_metrics["loss"]
                 patience = 0
@@ -133,7 +144,8 @@ def main():
                 val_loss=record["best_val_loss"],
                 val_rmse=record["best_val_rmse"],
                 params=record["params"],
-            )
+            ),
+            flush=True,
         )
 
         if trial_best_val < best_val_loss:
@@ -169,7 +181,7 @@ def main():
         "block_feature_columns": bundle.feature_columns,
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    print("Best config written to {}".format(output_dir / "best_config.json"))
+    print("Best config written to {}".format(output_dir / "best_config.json"), flush=True)
 
 
 if __name__ == "__main__":

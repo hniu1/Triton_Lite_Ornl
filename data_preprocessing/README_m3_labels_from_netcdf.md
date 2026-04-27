@@ -107,6 +107,8 @@ The script writes `labels.parquet` with columns:
 - all timesteps in the event cube
 - all raster cells that fall inside the block polygon
 
+If a block has no finite flooded cells for an event, `y` is written as `0.0`.
+
 The script sorts the final table by:
 
 - `watershed_id`
@@ -134,7 +136,6 @@ The script raises an error if:
 - the depth variable is missing
 - the blocks file has no CRS and `--blocks-crs` is not supplied
 - no usable block masks are generated
-- any label value is `NaN`
 - any event-block combinations are missing from the produced table
 
 ## Block ID behavior
