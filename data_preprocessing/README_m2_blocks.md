@@ -141,7 +141,7 @@ For the full watershed inventory path, the intended final training join is:
 
 - `events.csv` from Milestone 1
 - `blocks.parquet` from Milestone 2
-- `labels.parquet` from Milestone 3
+- `block_index_lookup.parquet` and `labels_10m_manifest.parquet` from Milestone 3
 
 joined through:
 

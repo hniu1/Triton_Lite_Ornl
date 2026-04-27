@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -A cli138
-#SBATCH -J blockwise_tune
+#SBATCH -J tune_bw_10m
 #SBATCH -N 1
-#SBATCH -t 12:00:00
-#SBATCH -o ./slurm_output/blockwise-tune-%j.out
-#SBATCH -e ./slurm_output/blockwise-tune-%j.err
+#SBATCH -t 08:00:00
+#SBATCH -o ./slurm_output/tune-bw-10m-%j.out
+#SBATCH -e ./slurm_output/tune-bw-10m-%j.err
 
 set -euo pipefail
 
@@ -18,12 +18,17 @@ mkdir -p slurm_output
 
 PYTHON_BIN=/ccs/home/haoranniu/miniconda3/envs/triton/bin/python
 
-echo "[$(date)] Starting blockwise tuning"
-${PYTHON_BIN} -u tune_blockwise.py \
+echo "[$(date)] Starting matrix tuning"
+
+${PYTHON_BIN} -u tune_blockwise_matrix.py \
   --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
   --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
-  --labels-parquet processed_data/blockwise_global/milestone_03_labels/labels.parquet \
-  --output-dir results_blockwise_tuning \
-  --test-events D040
+  --labels-10m-dir processed_data/blockwise_global/milestone_03_labels_10m \
+  --output-dir results_blockwise_matrix_tuning \
+  --test-events D040 \
+  --epochs 8 \
+  --early-stop-patience 3 \
+  --num-trials 3 \
+  --device cuda
 
-echo "[$(date)] Blockwise tuning completed successfully"
+echo "[$(date)] Matrix tuning completed"

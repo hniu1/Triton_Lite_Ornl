@@ -8,7 +8,6 @@ results*
 shapefiles/
 shapefiles/blocks_*
 shapefiles/MOM_raster_*
-01_train.sh
 slurm_output/
 __pycache__/blockwise_data.cpython-312.pyc
 __pycache__/blockwise_model.cpython-312.pyc

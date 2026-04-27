@@ -2,53 +2,52 @@ import argparse
 import json
 import random
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import torch
-import torch.nn as nn
 
-from blockwise_model import BlockwiseFloodModel
-from train_blockwise import (
-    make_loader,
-    resolve_device,
-    run_epoch,
-    set_seed,
-)
-from blockwise_data import prepare_blockwise_datasets
+from blockwise_matrix_data import prepare_blockwise_matrix_datasets
+from blockwise_model import BlockwiseFloodMatrixModel
+from train_blockwise_matrix import make_loader, resolve_device, run_epoch, set_seed
 
 
 DEFAULT_SEARCH_SPACE = {
     "learning_rate": [1e-4, 3e-4, 1e-3],
     "weight_decay": [0.0, 1e-6, 1e-5],
-    "batch_size": [64, 128, 256],
+    "batch_size": [8, 16, 32],
     "dropout": [0.0, 0.1, 0.2],
     "temporal_channels": [32, 64, 128],
     "event_embedding_dim": [32, 64, 128],
     "block_hidden_dim": [32, 64, 128],
     "fusion_hidden_dim": [64, 128, 256],
+    "decoder_base_channels": [64, 128],
+    "huber_delta": [0.1, 0.25, 0.5],
 }
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Tune the block-wise Triton Lite flood-depth surrogate")
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Tune the 80x80 block-wise Triton Lite flood-depth surrogate")
     parser.add_argument("--events-csv", type=Path, required=True)
     parser.add_argument("--blocks-parquet", type=Path, required=True)
-    parser.add_argument("--labels-parquet", type=Path, required=True)
+    parser.add_argument("--labels-10m-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--base-dir", type=Path, default=Path("."))
     parser.add_argument("--block-feature-columns", nargs="+", default=None)
     parser.add_argument("--test-events", nargs="+", default=None)
     parser.add_argument("--val-fraction", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--epochs", type=int, default=40)
-    parser.add_argument("--early-stop-patience", type=int, default=8)
+    parser.add_argument("--epochs", type=int, default=25)
+    parser.add_argument("--early-stop-patience", type=int, default=6)
     parser.add_argument("--num-trials", type=int, default=12)
+    parser.add_argument("--target-rows", type=int, default=80)
+    parser.add_argument("--target-cols", type=int, default=80)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
     return parser.parse_args()
 
 
-def sample_trial_params(rng):
+def sample_trial_params(rng: random.Random) -> Dict[str, float]:
     return {key: rng.choice(values) for key, values in DEFAULT_SEARCH_SPACE.items()}
 
 
@@ -58,22 +57,25 @@ def ensure_python_scalar(value):
     return value
 
 
-def main():
+def main() -> None:
     args = parse_args()
     set_seed(args.seed)
     rng = random.Random(args.seed)
+
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    bundle = prepare_blockwise_datasets(
+    bundle = prepare_blockwise_matrix_datasets(
         events_csv=args.events_csv.resolve(),
         blocks_parquet=args.blocks_parquet.resolve(),
-        labels_parquet=args.labels_parquet.resolve(),
+        labels_10m_dir=args.labels_10m_dir.resolve(),
         base_dir=args.base_dir.resolve(),
         feature_columns=args.block_feature_columns,
         test_events=args.test_events,
         val_fraction=args.val_fraction,
         seed=args.seed,
+        target_rows=args.target_rows,
+        target_cols=args.target_cols,
     )
 
     device = resolve_device(args.device)
@@ -84,13 +86,16 @@ def main():
 
     for trial_index in range(1, args.num_trials + 1):
         params = sample_trial_params(rng)
-        model = BlockwiseFloodModel(
+        model = BlockwiseFloodMatrixModel(
             event_features=event_feature_dim,
             block_features=len(bundle.feature_columns),
+            target_rows=bundle.target_shape[0],
+            target_cols=bundle.target_shape[1],
             temporal_channels=int(params["temporal_channels"]),
             event_embedding_dim=int(params["event_embedding_dim"]),
             block_hidden_dim=int(params["block_hidden_dim"]),
             fusion_hidden_dim=int(params["fusion_hidden_dim"]),
+            decoder_base_channels=int(params["decoder_base_channels"]),
             dropout=float(params["dropout"]),
         ).to(device)
         optimizer = torch.optim.Adam(
@@ -98,7 +103,6 @@ def main():
             lr=float(params["learning_rate"]),
             weight_decay=float(params["weight_decay"]),
         )
-        loss_fn = nn.MSELoss()
         train_loader = make_loader(bundle.train_dataset, int(params["batch_size"]), shuffle=True, num_workers=args.num_workers)
         val_loader = make_loader(bundle.val_dataset, int(params["batch_size"]), shuffle=False, num_workers=args.num_workers)
 
@@ -107,20 +111,9 @@ def main():
         history = []
 
         for epoch in range(1, args.epochs + 1):
-            train_metrics = run_epoch(model, train_loader, optimizer, loss_fn, device)
-            val_metrics = run_epoch(model, val_loader, None, loss_fn, device)
+            train_metrics = run_epoch(model, train_loader, optimizer, device, float(params["huber_delta"]))
+            val_metrics = run_epoch(model, val_loader, None, device, float(params["huber_delta"]))
             history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics})
-
-            print(
-                "trial {trial:03d} epoch {epoch:03d} train_loss={train_loss:.6f} val_loss={val_loss:.6f} val_rmse={val_rmse:.6f}".format(
-                    trial=trial_index,
-                    epoch=epoch,
-                    train_loss=train_metrics["loss"],
-                    val_loss=val_metrics["loss"],
-                    val_rmse=val_metrics["rmse"],
-                ),
-                flush=True,
-            )
 
             if val_metrics["loss"] < trial_best_val - 1e-8:
                 trial_best_val = val_metrics["loss"]
@@ -144,8 +137,7 @@ def main():
                 val_loss=record["best_val_loss"],
                 val_rmse=record["best_val_rmse"],
                 params=record["params"],
-            ),
-            flush=True,
+            )
         )
 
         if trial_best_val < best_val_loss:
@@ -162,6 +154,8 @@ def main():
         "seed": args.seed,
         "epochs": args.epochs,
         "early_stop_patience": args.early_stop_patience,
+        "target_rows": bundle.target_shape[0],
+        "target_cols": bundle.target_shape[1],
         "batch_size": best_trial["params"]["batch_size"],
         "learning_rate": best_trial["params"]["learning_rate"],
         "weight_decay": best_trial["params"]["weight_decay"],
@@ -170,6 +164,8 @@ def main():
         "event_embedding_dim": best_trial["params"]["event_embedding_dim"],
         "block_hidden_dim": best_trial["params"]["block_hidden_dim"],
         "fusion_hidden_dim": best_trial["params"]["fusion_hidden_dim"],
+        "decoder_base_channels": best_trial["params"]["decoder_base_channels"],
+        "huber_delta": best_trial["params"]["huber_delta"],
     }
 
     (output_dir / "trials.json").write_text(json.dumps(trial_records, indent=2))
@@ -178,10 +174,11 @@ def main():
         "best_trial": best_trial,
         "num_trials": len(trial_records),
         "event_shape": list(bundle.event_shape),
+        "target_shape": list(bundle.target_shape),
         "block_feature_columns": bundle.feature_columns,
     }
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
-    print("Best config written to {}".format(output_dir / "best_config.json"), flush=True)
+    print("Best config written to {}".format(output_dir / "best_config.json"))
 
 
 if __name__ == "__main__":

@@ -4,14 +4,11 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-import torch
 from sklearn.model_selection import train_test_split
-from torch.utils.data import Dataset
 
 
 REQUIRED_EVENT_COLUMNS = {"event_id", "watershed_id", "path_to_X_event", "T", "F"}
 REQUIRED_BLOCK_COLUMNS = {"watershed_id", "block_id"}
-REQUIRED_LABEL_COLUMNS = {"event_id", "watershed_id", "block_id", "y"}
 
 
 @dataclass
@@ -27,45 +24,6 @@ class BlockwiseSplit:
     train_df: pd.DataFrame
     val_df: pd.DataFrame
     test_df: pd.DataFrame
-
-
-@dataclass
-class BlockwiseDataBundle:
-    train_dataset: Dataset
-    val_dataset: Dataset
-    test_dataset: Dataset
-    feature_columns: List[str]
-    event_shape: Tuple[int, int]
-    normalization: NormalizationStats
-    splits: BlockwiseSplit
-
-
-class BlockwiseFloodDataset(Dataset):
-    def __init__(
-        self,
-        samples: pd.DataFrame,
-        event_arrays: Dict[str, np.ndarray],
-        block_feature_map: Dict[Tuple[str, str], np.ndarray],
-    ) -> None:
-        self.samples = samples.reset_index(drop=True)
-        self.event_arrays = event_arrays
-        self.block_feature_map = block_feature_map
-
-    def __len__(self) -> int:
-        return len(self.samples)
-
-    def __getitem__(self, index: int):
-        row = self.samples.iloc[index]
-        sample_key = (row["watershed_id"], row["block_id"])
-        event_tensor = self.event_arrays[row["event_key"]]
-        block_features = self.block_feature_map[sample_key]
-        target = np.float32(row["y"])
-
-        return (
-            torch.from_numpy(event_tensor.copy()),
-            torch.from_numpy(block_features.copy()),
-            torch.tensor(target, dtype=torch.float32),
-        )
 
 
 def event_key(watershed_id: str, event_id: str) -> str:
@@ -240,149 +198,4 @@ def split_samples_by_event(
         train_df=merged_df.loc[merged_df["event_key"].isin(train_keys)].reset_index(drop=True),
         val_df=merged_df.loc[merged_df["event_key"].isin(val_keys)].reset_index(drop=True),
         test_df=merged_df.loc[merged_df["event_key"].isin(test_keys)].reset_index(drop=True),
-    )
-
-
-def load_blockwise_training_frame(
-    events_csv: Path,
-    blocks_parquet: Path,
-    labels_parquet: Path,
-    base_dir: Path,
-    feature_columns: Optional[Sequence[str]] = None,
-) -> Tuple[pd.DataFrame, pd.DataFrame, List[str]]:
-    events_df = pd.read_csv(events_csv)
-    blocks_df = pd.read_parquet(blocks_parquet)
-    labels_df = pd.read_parquet(labels_parquet)
-
-    _validate_columns(events_df, REQUIRED_EVENT_COLUMNS, "events.csv")
-    _validate_columns(blocks_df, REQUIRED_BLOCK_COLUMNS, "blocks.parquet")
-    _validate_columns(labels_df, REQUIRED_LABEL_COLUMNS, "labels.parquet")
-
-    events_df = events_df.copy()
-    events_df["event_key"] = [
-        event_key(watershed_id, event_id)
-        for watershed_id, event_id in zip(events_df["watershed_id"], events_df["event_id"])
-    ]
-    events_df["resolved_event_path"] = [
-        str(
-            _resolve_event_path(
-                raw_path=raw_path,
-                base_dir=base_dir,
-                events_csv_path=events_csv,
-                watershed_id=watershed_id,
-                event_id=event_id,
-            )
-        )
-        for raw_path, watershed_id, event_id in zip(
-            events_df["path_to_X_event"],
-            events_df["watershed_id"],
-            events_df["event_id"],
-        )
-    ]
-
-    if feature_columns is None:
-        feature_columns = [
-            column
-            for column in blocks_df.columns
-            if column not in {"watershed_id", "block_id"}
-        ]
-    feature_columns = list(feature_columns)
-    if not feature_columns:
-        raise ValueError("No block feature columns were selected")
-
-    missing_features = [column for column in feature_columns if column not in blocks_df.columns]
-    if missing_features:
-        raise ValueError(f"Requested block feature columns are missing from blocks.parquet: {missing_features}")
-
-    merge_columns = ["watershed_id", "block_id", *feature_columns]
-    merged_df = labels_df.merge(
-        events_df[["watershed_id", "event_id", "event_key", "resolved_event_path", "T", "F"]],
-        on=["watershed_id", "event_id"],
-        how="inner",
-        validate="many_to_one",
-    ).merge(
-        blocks_df[merge_columns],
-        on=["watershed_id", "block_id"],
-        how="inner",
-        validate="many_to_one",
-    )
-
-    if len(merged_df) != len(labels_df):
-        raise ValueError(
-            f"Join coverage mismatch: labels has {len(labels_df)} rows but merged training frame has {len(merged_df)} rows"
-        )
-
-    merged_df["y"] = pd.to_numeric(merged_df["y"], errors="coerce")
-    for column in feature_columns:
-        merged_df[column] = pd.to_numeric(merged_df[column], errors="coerce")
-
-    if merged_df["y"].isna().any():
-        raise ValueError("labels.parquet contains non-numeric or missing y values after join")
-    if merged_df[feature_columns].isna().any().any():
-        raise ValueError("blocks.parquet contains non-numeric or missing feature values in selected feature columns")
-
-    return merged_df.sort_values(["watershed_id", "event_id", "block_id"]).reset_index(drop=True), blocks_df, feature_columns
-
-
-def prepare_blockwise_datasets(
-    events_csv: Path,
-    blocks_parquet: Path,
-    labels_parquet: Path,
-    base_dir: Path,
-    feature_columns: Optional[Sequence[str]],
-    test_events: Optional[Sequence[str]],
-    val_fraction: float,
-    seed: int,
-) -> BlockwiseDataBundle:
-    merged_df, blocks_df, feature_columns = load_blockwise_training_frame(
-        events_csv=events_csv,
-        blocks_parquet=blocks_parquet,
-        labels_parquet=labels_parquet,
-        base_dir=base_dir,
-        feature_columns=feature_columns,
-    )
-
-    splits = split_samples_by_event(
-        merged_df=merged_df,
-        test_events=test_events,
-        val_fraction=val_fraction,
-        seed=seed,
-    )
-
-    events_for_loading = (
-        pd.concat(
-            [
-                splits.train_df[["event_key", "resolved_event_path", "T", "F"]],
-                splits.val_df[["event_key", "resolved_event_path", "T", "F"]],
-                splits.test_df[["event_key", "resolved_event_path", "T", "F"]],
-            ],
-            ignore_index=True,
-        )
-        .drop_duplicates(subset=["event_key"])
-        .reset_index(drop=True)
-    )
-    event_arrays = _load_and_validate_event_arrays(events_for_loading)
-
-    train_event_keys = sorted(splits.train_df["event_key"].unique().tolist())
-    event_mean, event_std = _fit_event_normalization(train_event_keys, event_arrays)
-    block_mean, block_std = _fit_block_normalization(splits.train_df, feature_columns)
-
-    normalized_events = _normalize_event_arrays(event_arrays, event_mean, event_std)
-    normalized_blocks = _build_block_feature_map(blocks_df, feature_columns, block_mean, block_std)
-
-    sample_event_shape = next(iter(normalized_events.values())).shape
-
-    return BlockwiseDataBundle(
-        train_dataset=BlockwiseFloodDataset(splits.train_df, normalized_events, normalized_blocks),
-        val_dataset=BlockwiseFloodDataset(splits.val_df, normalized_events, normalized_blocks),
-        test_dataset=BlockwiseFloodDataset(splits.test_df, normalized_events, normalized_blocks),
-        feature_columns=feature_columns,
-        event_shape=sample_event_shape,
-        normalization=NormalizationStats(
-            event_mean=event_mean,
-            event_std=event_std,
-            block_mean=block_mean,
-            block_std=block_std,
-        ),
-        splits=splits,
     )

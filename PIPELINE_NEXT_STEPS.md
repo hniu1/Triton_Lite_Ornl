@@ -1,16 +1,15 @@
 # Block-wise Training and Testing Pipeline Note
 
 This note describes the next execution steps for the current Triton Lite
-block-wise surrogate workflow. It is intended as the operating plan before we
-launch real tuning, training, and testing runs.
+block-wise 10m surrogate workflow.
 
 ## Goal
 
-Train one shared model that predicts block-wise peak flood depth from:
+Train one shared model that predicts a block-local 10m depth field from:
 
 - `X_event` from Milestone 1
 - `X_block` from Milestone 2
-- `y` from Milestone 3
+- `Y_10m` and block mask from Milestone 3
 
 Each supervised sample is one `(event_id, watershed_id, block_id)` row.
 
@@ -20,7 +19,7 @@ Before starting, we need these three artifacts:
 
 - `events.csv` from `data_preprocessing/m1b_event_to_tensor.py`
 - `blocks.parquet` from `data_preprocessing/m2_block_feature_extraction.py`
-- `labels.parquet` from `data_preprocessing/m3_construct_labels_from_netcdf.py`
+- 10m label assets from `data_preprocessing/m3_prepare_10m_label_assets.py`
 
 These must align on:
 
@@ -37,10 +36,10 @@ Checks:
 
 - all `path_to_X_event` files exist
 - all event tensors share one common `(T, F)` shape
-- `events.csv` and `labels.parquet` agree on event coverage
-- `blocks.parquet` and `labels.parquet` agree on block coverage
+- `events.csv` and `labels_10m_manifest.parquet` agree on event coverage
+- `blocks.parquet` and `block_index_lookup.parquet` agree on block coverage
 - selected block feature columns are numeric and non-null
-- `labels.parquet` has no missing `y`
+- block masks and target patches are aligned and padded consistently to `80 x 80`
 
 Primary purpose:
 
@@ -48,7 +47,7 @@ Primary purpose:
 
 ## Stage 2: Freeze the Split Strategy
 
-We should define the held-out test set before tuning.
+We should define the held-out test set before training.
 
 Rules:
 
@@ -64,42 +63,15 @@ Recommended setup:
 If we want to measure cross-watershed generalization explicitly, we should also
 run at least one experiment with unseen watershed coverage in the test set.
 
-## Stage 3: Hyperparameter Tuning
+## Stage 3: Matrix Training
 
-Run `tune_blockwise.py` using the fixed test split.
-
-Purpose:
-
-- search model size and optimization settings on train/validation only
-- produce a reusable `best_config.json`
-
-Recommended first pass:
-
-- modest number of trials
-- early stopping enabled
-- CPU or GPU depending availability
-
-Outputs to review:
-
-- `best_config.json`
-- `trials.json`
-- `summary.json`
-
-Questions to answer after tuning:
-
-- are the best trials consistently better, or just noisy
-- is the model too small or too large
-- is validation error stable across candidate settings
-
-## Stage 4: Final Training
-
-Run `train_blockwise.py` with the tuned config.
+Run `train_blockwise_matrix.py` with the fixed test split.
 
 Inputs:
 
 - Milestone 1/2/3 data
 - fixed test event list
-- `best_config.json` from tuning
+- target patch size of `80 x 80`
 
 Expected outputs:
 
@@ -111,50 +83,29 @@ Expected outputs:
 
 What to review:
 
-- train vs validation loss
-- RMSE and MAE on validation
+- train vs validation masked loss
+- RMSE and MAE on valid cells
 - signs of overfitting
 - whether one watershed dominates the data distribution
 
-## Stage 5: Held-out Testing and Prediction
+## Stage 4: Held-out Testing
 
-Run `predict_blockwise.py` on the held-out test events.
-
-Use:
-
-- `best_model.pt`
-- `normalization_stats.npz`
-- `events.csv`
-- `blocks.parquet`
-
-Two modes:
-
-- with `labels.parquet` for evaluation
-- without `labels.parquet` for pure inference
-
-Outputs:
-
-- prediction parquet with `y_pred`
-- optional metrics JSON if labels are provided
+Evaluate the saved matrix model on the held-out test events using the training script outputs.
 
 What to review:
 
-- overall RMSE / MAE / R2
+- overall RMSE / MAE / R2 on valid cells
 - per-event behavior
 - per-watershed behavior
-- bias toward underprediction or overprediction
-- behavior on low-depth vs high-depth blocks
+- spatial underprediction or overprediction patterns inside blocks
 
 ## Recommended Directory Layout
 
 Use separate directories for each step:
 
-- `results_blockwise_tuning/`
-- `results_blockwise_train/`
-- `results_blockwise_predictions/`
+- `results_blockwise_matrix_train/`
 
-This keeps tuning artifacts, final training artifacts, and prediction outputs
-from getting mixed together.
+This keeps matrix training artifacts isolated.
 
 ## Recommended First Real Run
 
@@ -162,10 +113,9 @@ Suggested order:
 
 1. validate Milestone 1/2/3 coverage and shapes
 2. define the fixed `--test-events`
-3. run a small tuning sweep
-4. train one final model from the tuned config
-5. run prediction on the held-out test events
-6. summarize errors and decide whether to revise features, split design, or model size
+3. train one matrix model on a small subset
+4. train one full matrix model
+5. summarize errors and decide whether to revise features, split design, or decoder size
 
 ## Likely Early Failure Modes
 
@@ -182,7 +132,7 @@ The most likely blockers are:
 After the first complete tuning-training-testing pass, we should decide:
 
 - whether the current block feature set is sufficient
-- whether event encoder capacity should be increased or reduced
+- whether event encoder or decoder capacity should be increased or reduced
 - whether the split should stress unseen watersheds more directly
 - whether we need weighted losses or target transforms for skewed depth values
 - whether prediction outputs should be expanded into a downstream export product
