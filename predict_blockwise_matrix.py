@@ -16,7 +16,7 @@ from blockwise_matrix_data import (
     _compute_block_windows,
 )
 from blockwise_model import BlockwiseFloodMatrixModel
-from train_blockwise_matrix import resolve_device
+from train_blockwise_matrix import configure_cuda_runtime, resolve_device
 
 
 REQUIRED_EVENT_COLUMNS = {"event_id", "watershed_id", "path_to_X_event", "T", "F"}
@@ -33,6 +33,7 @@ class MatrixInferenceDataset(Dataset):
         block_windows: Dict[int, BlockWindow],
         target_shape: Tuple[int, int],
         peak_grids: Optional[Dict[str, np.ndarray]] = None,
+        static_feature_array: Optional[np.ndarray] = None,
     ) -> None:
         self.frame = frame.reset_index(drop=True)
         self.event_arrays = event_arrays
@@ -41,6 +42,8 @@ class MatrixInferenceDataset(Dataset):
         self.block_windows = block_windows
         self.target_rows, self.target_cols = target_shape
         self.peak_grids = peak_grids
+        # shape: (n_blocks, C, H, W) or None when not using raster features
+        self.static_feature_array = static_feature_array
 
     def __len__(self) -> int:
         return len(self.frame)
@@ -76,6 +79,9 @@ class MatrixInferenceDataset(Dataset):
             target_patch *= mask_patch
             payload.append(torch.from_numpy(self._pad_patch(target_patch)))
 
+        if self.static_feature_array is not None:
+            payload.append(torch.from_numpy(self.static_feature_array[int(row["block_index"])].copy()))
+
         return tuple(payload)
 
 
@@ -93,6 +99,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--evaluate", action="store_true", help="Compute masked metrics when target peak rasters exist")
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
+    parser.add_argument(
+        "--static-rasters-dir",
+        type=Path,
+        default=None,
+        help="Directory containing block_static_features.npy and block_static_feature_stats.json (V3)",
+    )
     return parser.parse_args()
 
 
@@ -217,6 +229,7 @@ def finalize_masked_metrics(accumulator: Dict[str, float]) -> Dict[str, float]:
 def main() -> None:
     args = parse_args()
     device = resolve_device(args.device)
+    configure_cuda_runtime(device)
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -262,6 +275,22 @@ def main() -> None:
         target_cols=final_target_shape[1],
     )
 
+    # Optional static raster features (V3 model)
+    import json as _json
+
+    static_feature_array: Optional[np.ndarray] = None
+    if args.static_rasters_dir is not None:
+        static_rasters_dir = args.static_rasters_dir.resolve()
+        raw = np.load(static_rasters_dir / "block_static_features.npy", mmap_mode="r")
+        with open(static_rasters_dir / "block_static_feature_stats.json") as fh:
+            stats = _json.load(fh)
+        channel_means = np.array(stats["mean"], dtype=np.float32)
+        channel_stds = np.array(stats["std"], dtype=np.float32)
+        channel_stds = np.where(channel_stds < 1e-6, 1.0, channel_stds)
+        static_feature_array = (
+            (raw.astype(np.float32) - channel_means[None, :, None, None]) / channel_stds[None, :, None, None]
+        )
+
     peak_grids = None
     if args.evaluate:
         peak_grids = load_peak_grids(labels_10m_dir, events_df[["event_key"]].drop_duplicates())
@@ -279,11 +308,21 @@ def main() -> None:
         block_windows=block_windows,
         target_shape=final_target_shape,
         peak_grids=peak_grids,
+        static_feature_array=static_feature_array,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
 
-    model = BlockwiseFloodMatrixModel(**checkpoint["model_config"]).to(device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model_config = checkpoint["model_config"]
+    # Backward compat: older checkpoints lack static_raster_channels / raster_enc_channels
+    model_config.setdefault("static_raster_channels", 0)
+    model_config.setdefault("raster_enc_channels", 16)
+    model = BlockwiseFloodMatrixModel(**model_config).to(device)
+    state_dict = checkpoint["model_state_dict"]
+    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    if missing_keys:
+        print(f"[Checkpoint] Missing keys (using initialized defaults): {missing_keys}")
+    if unexpected_keys:
+        print(f"[Checkpoint] Unexpected keys ignored: {unexpected_keys}")
     model.eval()
 
     prediction_path = output_dir / "predictions.npy"
@@ -293,32 +332,64 @@ def main() -> None:
         dtype=np.float32,
         shape=(len(dataset), final_target_shape[0], final_target_shape[1]),
     )
+    wet_probability_path = output_dir / "wet_probabilities.npy"
+    wet_probability_array = None
 
     metrics_accumulator = {"count": 0.0, "sum_abs": 0.0, "sum_sq": 0.0, "sum_y": 0.0, "sum_y_sq": 0.0}
     sample_offset = 0
 
+    has_static = static_feature_array is not None
     with torch.no_grad():
         for batch in loader:
-            if args.evaluate:
+            static_raster = None
+            if has_static and args.evaluate:
+                event_tensor, block_features, block_mask, target_map, static_raster = batch
+                target_map_np = target_map.numpy()
+            elif has_static:
+                event_tensor, block_features, block_mask, static_raster = batch
+                target_map_np = None
+            elif args.evaluate:
                 event_tensor, block_features, block_mask, target_map = batch
                 target_map_np = target_map.numpy()
             else:
                 event_tensor, block_features, block_mask = batch
                 target_map_np = None
 
-            prediction_map = model(
+            if static_raster is not None:
+                static_raster = static_raster.to(device)
+
+            model_output = model(
                 event_tensor.to(device),
                 block_features.to(device),
                 block_mask.to(device),
-            ).cpu().numpy().astype(np.float32)
+                static_raster,
+            )
+            if isinstance(model_output, tuple):
+                prediction_map = model_output[0].cpu().numpy().astype(np.float32)
+                wet_logits = model_output[1]
+                wet_probability_map = torch.sigmoid(wet_logits).cpu().numpy().astype(np.float32)
+                if wet_probability_array is None:
+                    wet_probability_array = np.lib.format.open_memmap(
+                        wet_probability_path,
+                        mode="w+",
+                        dtype=np.float32,
+                        shape=(len(dataset), final_target_shape[0], final_target_shape[1]),
+                    )
+            else:
+                prediction_map = model_output.cpu().numpy().astype(np.float32)
+                wet_probability_map = None
 
             batch_size = prediction_map.shape[0]
             prediction_array[sample_offset : sample_offset + batch_size] = prediction_map
+            if wet_probability_array is not None and wet_probability_map is not None:
+                wet_probability_array[sample_offset : sample_offset + batch_size] = wet_probability_map
             if args.evaluate and target_map_np is not None:
                 update_masked_metrics(metrics_accumulator, prediction_map, target_map_np, block_mask.numpy())
             sample_offset += batch_size
 
     prediction_array.flush()
+    if wet_probability_array is not None:
+        wet_probability_array.flush()
 
     manifest = inference_frame.copy()
     manifest.insert(0, "sample_index", np.arange(len(manifest), dtype=np.int64))
@@ -331,6 +402,8 @@ def main() -> None:
         "target_shape": list(final_target_shape),
         "evaluated": bool(args.evaluate),
     }
+    if wet_probability_array is not None:
+        summary["wet_probability_path"] = str(wet_probability_path)
 
     if args.evaluate:
         metrics = finalize_masked_metrics(metrics_accumulator)

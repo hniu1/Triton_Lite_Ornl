@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 
@@ -65,6 +67,26 @@ class MLP(nn.Module):
         return self.net(x)
 
 
+class StaticRasterEncoder(nn.Module):
+    """Lightweight CNN that compresses C_static × 80 × 80 static hydraulic channels
+    into a spatial feature map of shape raster_enc_channels × 80 × 80."""
+
+    def __init__(self, in_channels: int, out_channels: int = 16) -> None:
+        super().__init__()
+        mid = max(out_channels, in_channels * 2)
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, mid, kernel_size=3, padding=1),
+            nn.BatchNorm2d(mid),
+            nn.ReLU(),
+            nn.Conv2d(mid, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
 class BlockwiseFloodMatrixModel(nn.Module):
     def __init__(
         self,
@@ -78,6 +100,8 @@ class BlockwiseFloodMatrixModel(nn.Module):
         fusion_hidden_dim: int = 128,
         decoder_base_channels: int = 128,
         dropout: float = 0.1,
+        static_raster_channels: int = 0,
+        raster_enc_channels: int = 16,
     ) -> None:
         super().__init__()
         if target_rows != 80 or target_cols != 80:
@@ -110,8 +134,25 @@ class BlockwiseFloodMatrixModel(nn.Module):
             UpsampleBlock(decoder_base_channels // 2, decoder_base_channels // 4),
             UpsampleBlock(decoder_base_channels // 4, decoder_base_channels // 8),
         )
-        head_channels = (decoder_base_channels // 8) + 3
-        self.head = nn.Sequential(
+
+        # Optional static raster encoder (channels = 0 means disabled; backwards-compatible)
+        self.static_raster_channels = static_raster_channels
+        self.raster_enc_channels = raster_enc_channels if static_raster_channels > 0 else 0
+        if static_raster_channels > 0:
+            self.raster_encoder = StaticRasterEncoder(
+                in_channels=static_raster_channels,
+                out_channels=raster_enc_channels,
+            )
+        else:
+            self.raster_encoder = None  # type: ignore[assignment]
+
+        head_channels = (decoder_base_channels // 8) + 3 + self.raster_enc_channels
+        self.depth_head = nn.Sequential(
+            nn.Conv2d(head_channels, decoder_base_channels // 8, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(decoder_base_channels // 8, 1, kernel_size=1),
+        )
+        self.wet_head = nn.Sequential(
             nn.Conv2d(head_channels, decoder_base_channels // 8, kernel_size=3, padding=1),
             nn.ReLU(),
             nn.Conv2d(decoder_base_channels // 8, 1, kernel_size=1),
@@ -130,7 +171,8 @@ class BlockwiseFloodMatrixModel(nn.Module):
         event_tensor: torch.Tensor,
         block_features: torch.Tensor,
         block_mask: torch.Tensor,
-    ) -> torch.Tensor:
+        static_raster: Optional[torch.Tensor] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         event_embedding = self.temporal_encoder(event_tensor)
         block_embedding = self.block_encoder(block_features)
         fused = torch.cat([event_embedding, block_embedding], dim=-1)
@@ -140,5 +182,18 @@ class BlockwiseFloodMatrixModel(nn.Module):
 
         mask_channel = block_mask.unsqueeze(1)
         coord_channels = self._coordinate_channels(batch_size=fused.shape[0], device=fused.device)
-        logits = self.head(torch.cat([decoded, mask_channel, coord_channels], dim=1))
-        return self.output_activation(logits).squeeze(1) * block_mask
+        parts = [decoded, mask_channel, coord_channels]
+        if self.raster_encoder is not None:
+            if static_raster is None:
+                # Fallback: substitute zero-filled raster (e.g., when running inference
+                # without providing the optional static raster dir)
+                static_raster = torch.zeros(
+                    decoded.shape[0], self.static_raster_channels, self.target_rows, self.target_cols,
+                    device=decoded.device, dtype=decoded.dtype,
+                )
+            parts.append(self.raster_encoder(static_raster))
+        fused_map = torch.cat(parts, dim=1)
+        depth_logits = self.depth_head(fused_map)
+        wet_logits = self.wet_head(fused_map).squeeze(1)
+        depth_map = self.output_activation(depth_logits).squeeze(1) * block_mask
+        return depth_map, wet_logits

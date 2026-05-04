@@ -1,6 +1,8 @@
 #!/bin/bash
 #SBATCH -A cli138
 #SBATCH -J tune_bw_10m
+#SBATCH -p gpu
+#SBATCH --gres=gpu:1
 #SBATCH -N 1
 #SBATCH -t 08:00:00
 #SBATCH -o ./slurm_output/tune-bw-10m-%j.out
@@ -17,8 +19,10 @@ conda activate triton
 mkdir -p slurm_output
 
 PYTHON_BIN=/ccs/home/haoranniu/miniconda3/envs/triton/bin/python
+DEVICE=${DEVICE:-auto}
 
 echo "[$(date)] Starting matrix tuning"
+echo "Device: ${DEVICE}"
 
 ${PYTHON_BIN} -u tune_blockwise_matrix.py \
   --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
@@ -29,6 +33,6 @@ ${PYTHON_BIN} -u tune_blockwise_matrix.py \
   --epochs 8 \
   --early-stop-patience 3 \
   --num-trials 3 \
-  --device cuda
+  --device "${DEVICE}"
 
 echo "[$(date)] Matrix tuning completed"

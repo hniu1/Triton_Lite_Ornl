@@ -9,7 +9,7 @@ import torch
 
 from blockwise_matrix_data import prepare_blockwise_matrix_datasets
 from blockwise_model import BlockwiseFloodMatrixModel
-from train_blockwise_matrix import make_loader, resolve_device, run_epoch, set_seed
+from train_blockwise_matrix import configure_cuda_runtime, make_loader, resolve_device, run_epoch, set_seed
 
 
 DEFAULT_SEARCH_SPACE = {
@@ -23,6 +23,10 @@ DEFAULT_SEARCH_SPACE = {
     "fusion_hidden_dim": [64, 128, 256],
     "decoder_base_channels": [64, 128],
     "huber_delta": [0.1, 0.25, 0.5],
+    "depth_weight_alpha": [0.0, 0.5, 1.0],
+    "depth_weight_cap": [2.0, 3.0, 4.0],
+    "aux_wet_loss_weight": [0.0, 0.1, 0.2, 0.4],
+    "wet_threshold": [0.03, 0.05, 0.1],
 }
 
 
@@ -79,6 +83,7 @@ def main() -> None:
     )
 
     device = resolve_device(args.device)
+    configure_cuda_runtime(device)
     _, event_feature_dim = bundle.event_shape
     trial_records = []
     best_trial = None
@@ -111,8 +116,28 @@ def main() -> None:
         history = []
 
         for epoch in range(1, args.epochs + 1):
-            train_metrics = run_epoch(model, train_loader, optimizer, device, float(params["huber_delta"]))
-            val_metrics = run_epoch(model, val_loader, None, device, float(params["huber_delta"]))
+            train_metrics = run_epoch(
+                model,
+                train_loader,
+                optimizer,
+                device,
+                float(params["huber_delta"]),
+                depth_weight_alpha=float(params["depth_weight_alpha"]),
+                depth_weight_cap=float(params["depth_weight_cap"]),
+                aux_wet_loss_weight=float(params["aux_wet_loss_weight"]),
+                wet_threshold=float(params["wet_threshold"]),
+            )
+            val_metrics = run_epoch(
+                model,
+                val_loader,
+                None,
+                device,
+                float(params["huber_delta"]),
+                depth_weight_alpha=float(params["depth_weight_alpha"]),
+                depth_weight_cap=float(params["depth_weight_cap"]),
+                aux_wet_loss_weight=float(params["aux_wet_loss_weight"]),
+                wet_threshold=float(params["wet_threshold"]),
+            )
             history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics})
 
             if val_metrics["loss"] < trial_best_val - 1e-8:
@@ -166,6 +191,10 @@ def main() -> None:
         "fusion_hidden_dim": best_trial["params"]["fusion_hidden_dim"],
         "decoder_base_channels": best_trial["params"]["decoder_base_channels"],
         "huber_delta": best_trial["params"]["huber_delta"],
+        "depth_weight_alpha": best_trial["params"]["depth_weight_alpha"],
+        "depth_weight_cap": best_trial["params"]["depth_weight_cap"],
+        "aux_wet_loss_weight": best_trial["params"]["aux_wet_loss_weight"],
+        "wet_threshold": best_trial["params"]["wet_threshold"],
     }
 
     (output_dir / "trials.json").write_text(json.dumps(trial_records, indent=2))

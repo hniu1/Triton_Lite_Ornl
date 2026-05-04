@@ -46,6 +46,7 @@ class BlockwiseMatrixDataBundle:
     target_shape: Tuple[int, int]
     normalization: NormalizationStats
     splits: BlockwiseSplit
+    static_raster_channels: int = 0
 
 
 class BlockwiseFloodMatrixDataset(Dataset):
@@ -58,6 +59,7 @@ class BlockwiseFloodMatrixDataset(Dataset):
         block_index_grid: np.ndarray,
         block_windows: Dict[int, BlockWindow],
         target_shape: Tuple[int, int],
+        static_feature_array: Optional[np.ndarray] = None,
     ) -> None:
         self.samples = samples.reset_index(drop=True)
         self.event_arrays = event_arrays
@@ -66,6 +68,8 @@ class BlockwiseFloodMatrixDataset(Dataset):
         self.block_index_grid = block_index_grid
         self.block_windows = block_windows
         self.target_rows, self.target_cols = target_shape
+        # shape: (n_blocks, C, H, W) or None when not using raster features
+        self.static_feature_array = static_feature_array
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -101,6 +105,12 @@ class BlockwiseFloodMatrixDataset(Dataset):
             torch.from_numpy(block_features.copy()),
             torch.from_numpy(self._pad_patch(mask_patch)),
             torch.from_numpy(self._pad_patch(target_patch)),
+        ) if self.static_feature_array is None else (
+            torch.from_numpy(event_tensor.copy()),
+            torch.from_numpy(block_features.copy()),
+            torch.from_numpy(self._pad_patch(mask_patch)),
+            torch.from_numpy(self._pad_patch(target_patch)),
+            torch.from_numpy(self.static_feature_array[block_index].copy()),
         )
 
 
@@ -196,6 +206,7 @@ def prepare_blockwise_matrix_datasets(
     seed: int,
     target_rows: Optional[int] = 80,
     target_cols: Optional[int] = 80,
+    static_rasters_dir: Optional[Path] = None,
 ) -> BlockwiseMatrixDataBundle:
     events_df = pd.read_csv(events_csv)
     blocks_df = pd.read_parquet(blocks_parquet)
@@ -279,7 +290,7 @@ def prepare_blockwise_matrix_datasets(
         block_features_df.assign(_join=1),
         on=["watershed_id", "_join"],
         how="inner",
-        validate="one_to_many",
+        validate="many_to_many",
     ).drop(columns="_join")
 
     for column in feature_columns:
@@ -323,6 +334,30 @@ def prepare_blockwise_matrix_datasets(
         target_cols=target_cols,
     )
 
+    # ------------------------------------------------------------------
+    # Optional static raster features: load, z-score normalise, keep as
+    # a float32 array of shape (n_blocks, C, H, W) in memory.
+    # ------------------------------------------------------------------
+    import json
+
+    static_feature_array: Optional[np.ndarray] = None
+    static_raster_channels = 0
+    if static_rasters_dir is not None:
+        static_rasters_dir = Path(static_rasters_dir).resolve()
+        static_npy_path = static_rasters_dir / "block_static_features.npy"
+        static_stats_path = static_rasters_dir / "block_static_feature_stats.json"
+        raw = np.load(static_npy_path, mmap_mode="r")  # (n_blocks, C, H, W)
+        with open(static_stats_path) as fh:
+            stats = json.load(fh)
+        channel_means = np.array(stats["mean"], dtype=np.float32)
+        channel_stds = np.array(stats["std"], dtype=np.float32)
+        # Avoid division by zero for constant channels
+        channel_stds = np.where(channel_stds < 1e-6, 1.0, channel_stds)
+        # Normalise: broadcast over (n_blocks, H, W)
+        normed = (raw.astype(np.float32) - channel_means[None, :, None, None]) / channel_stds[None, :, None, None]
+        static_feature_array = normed  # fully in-memory float32
+        static_raster_channels = raw.shape[1]
+
     sample_event_shape = next(iter(normalized_events.values())).shape
 
     return BlockwiseMatrixDataBundle(
@@ -334,6 +369,7 @@ def prepare_blockwise_matrix_datasets(
             block_index_grid,
             block_windows,
             final_target_shape,
+            static_feature_array,
         ),
         val_dataset=BlockwiseFloodMatrixDataset(
             splits.val_df,
@@ -343,6 +379,7 @@ def prepare_blockwise_matrix_datasets(
             block_index_grid,
             block_windows,
             final_target_shape,
+            static_feature_array,
         ),
         test_dataset=BlockwiseFloodMatrixDataset(
             splits.test_df,
@@ -352,6 +389,7 @@ def prepare_blockwise_matrix_datasets(
             block_index_grid,
             block_windows,
             final_target_shape,
+            static_feature_array,
         ),
         feature_columns=feature_columns,
         event_shape=sample_event_shape,
@@ -363,4 +401,5 @@ def prepare_blockwise_matrix_datasets(
             block_std=block_std,
         ),
         splits=splits,
+        static_raster_channels=static_raster_channels,
     )
