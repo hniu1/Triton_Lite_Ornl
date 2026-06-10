@@ -47,6 +47,8 @@ class BlockwiseMatrixDataBundle:
     normalization: NormalizationStats
     splits: BlockwiseSplit
     static_raster_channels: int = 0
+    has_velocity_targets: bool = False
+    has_velocity_magnitude_target: bool = False
 
 
 class BlockwiseFloodMatrixDataset(Dataset):
@@ -60,6 +62,9 @@ class BlockwiseFloodMatrixDataset(Dataset):
         block_windows: Dict[int, BlockWindow],
         target_shape: Tuple[int, int],
         static_feature_array: Optional[np.ndarray] = None,
+        velocity_x_grids: Optional[Dict[str, np.ndarray]] = None,
+        velocity_y_grids: Optional[Dict[str, np.ndarray]] = None,
+        velocity_mag_grids: Optional[Dict[str, np.ndarray]] = None,
     ) -> None:
         self.samples = samples.reset_index(drop=True)
         self.event_arrays = event_arrays
@@ -70,6 +75,9 @@ class BlockwiseFloodMatrixDataset(Dataset):
         self.target_rows, self.target_cols = target_shape
         # shape: (n_blocks, C, H, W) or None when not using raster features
         self.static_feature_array = static_feature_array
+        self.velocity_x_grids = velocity_x_grids
+        self.velocity_y_grids = velocity_y_grids
+        self.velocity_mag_grids = velocity_mag_grids
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -100,18 +108,39 @@ class BlockwiseFloodMatrixDataset(Dataset):
         target_patch = np.where(np.isfinite(target_patch), target_patch, 0.0).astype(np.float32)
         target_patch *= mask_patch
 
-        return (
+        payload = [
             torch.from_numpy(event_tensor.copy()),
             torch.from_numpy(block_features.copy()),
             torch.from_numpy(self._pad_patch(mask_patch)),
             torch.from_numpy(self._pad_patch(target_patch)),
-        ) if self.static_feature_array is None else (
-            torch.from_numpy(event_tensor.copy()),
-            torch.from_numpy(block_features.copy()),
-            torch.from_numpy(self._pad_patch(mask_patch)),
-            torch.from_numpy(self._pad_patch(target_patch)),
-            torch.from_numpy(self.static_feature_array[block_index].copy()),
-        )
+        ]
+
+        if self.velocity_x_grids is not None and self.velocity_y_grids is not None:
+            velx_patch = np.asarray(
+                self.velocity_x_grids[row["event_key"]][window.row_start : window.row_stop, window.col_start : window.col_stop],
+                dtype=np.float32,
+            )
+            vely_patch = np.asarray(
+                self.velocity_y_grids[row["event_key"]][window.row_start : window.row_stop, window.col_start : window.col_stop],
+                dtype=np.float32,
+            )
+            velx_patch = np.where(np.isfinite(velx_patch), velx_patch, 0.0).astype(np.float32) * mask_patch
+            vely_patch = np.where(np.isfinite(vely_patch), vely_patch, 0.0).astype(np.float32) * mask_patch
+            payload.append(torch.from_numpy(self._pad_patch(velx_patch)))
+            payload.append(torch.from_numpy(self._pad_patch(vely_patch)))
+
+        if self.velocity_mag_grids is not None:
+            velmag_patch = np.asarray(
+                self.velocity_mag_grids[row["event_key"]][window.row_start : window.row_stop, window.col_start : window.col_stop],
+                dtype=np.float32,
+            )
+            velmag_patch = np.where(np.isfinite(velmag_patch), velmag_patch, 0.0).astype(np.float32) * mask_patch
+            payload.append(torch.from_numpy(self._pad_patch(velmag_patch)))
+
+        if self.static_feature_array is not None:
+            payload.append(torch.from_numpy(self.static_feature_array[block_index].copy()))
+
+        return tuple(payload)
 
 
 def _resolve_existing_path(raw_path: str, base_dir: Path, anchor_dir: Path) -> Path:
@@ -123,12 +152,12 @@ def _resolve_existing_path(raw_path: str, base_dir: Path, anchor_dir: Path) -> P
     raise FileNotFoundError(f"Could not resolve path '{raw_path}'")
 
 
-def _load_peak_grids(manifest_df: pd.DataFrame) -> Dict[str, np.ndarray]:
+def _load_peak_grids(manifest_df: pd.DataFrame, resolved_path_column: str = "resolved_peak_path") -> Dict[str, np.ndarray]:
     grids: Dict[str, np.ndarray] = {}
     for row in manifest_df.itertuples(index=False):
-        grid = np.load(row.resolved_peak_path, mmap_mode="r")
+        grid = np.load(getattr(row, resolved_path_column), mmap_mode="r")
         if grid.ndim != 2:
-            raise ValueError(f"Expected 2D peak raster, got shape {grid.shape} at {row.resolved_peak_path}")
+            raise ValueError(f"Expected 2D peak raster, got shape {grid.shape} at {getattr(row, resolved_path_column)}")
         grids[row.event_key] = grid
     return grids
 
@@ -207,6 +236,11 @@ def prepare_blockwise_matrix_datasets(
     target_rows: Optional[int] = 80,
     target_cols: Optional[int] = 80,
     static_rasters_dir: Optional[Path] = None,
+    include_velocity_targets: bool = False,
+    include_velocity_magnitude_target: bool = False,
+    velocity_x_manifest_column: str = "path_to_peak_velx_10m",
+    velocity_y_manifest_column: str = "path_to_peak_vely_10m",
+    velocity_mag_manifest_column: str = "path_to_peak_velmag_10m",
 ) -> BlockwiseMatrixDataBundle:
     events_df = pd.read_csv(events_csv)
     blocks_df = pd.read_parquet(blocks_parquet)
@@ -255,6 +289,34 @@ def prepare_blockwise_matrix_datasets(
         str(_resolve_existing_path(raw_path, labels_10m_dir, manifest_path.parent))
         for raw_path in manifest_df["path_to_peak_10m"]
     ]
+
+    velocity_x_grids: Optional[Dict[str, np.ndarray]] = None
+    velocity_y_grids: Optional[Dict[str, np.ndarray]] = None
+    velocity_mag_grids: Optional[Dict[str, np.ndarray]] = None
+    if include_velocity_targets:
+        for required_col in [velocity_x_manifest_column, velocity_y_manifest_column]:
+            if required_col not in manifest_df.columns:
+                raise ValueError(
+                    f"Velocity targets were requested but manifest is missing column '{required_col}'"
+                )
+        manifest_df["resolved_velx_path"] = [
+            str(_resolve_existing_path(raw_path, labels_10m_dir, manifest_path.parent))
+            for raw_path in manifest_df[velocity_x_manifest_column]
+        ]
+        manifest_df["resolved_vely_path"] = [
+            str(_resolve_existing_path(raw_path, labels_10m_dir, manifest_path.parent))
+            for raw_path in manifest_df[velocity_y_manifest_column]
+        ]
+
+    if include_velocity_magnitude_target:
+        if velocity_mag_manifest_column not in manifest_df.columns:
+            raise ValueError(
+                f"Velocity magnitude target was requested but manifest is missing column '{velocity_mag_manifest_column}'"
+            )
+        manifest_df["resolved_velmag_path"] = [
+            str(_resolve_existing_path(raw_path, labels_10m_dir, manifest_path.parent))
+            for raw_path in manifest_df[velocity_mag_manifest_column]
+        ]
 
     if feature_columns is None:
         feature_columns = [column for column in blocks_df.columns if column not in {"watershed_id", "block_id"}]
@@ -320,6 +382,14 @@ def prepare_blockwise_matrix_datasets(
     event_arrays = _load_and_validate_event_arrays(events_for_loading)
     peak_manifest = event_frame[["event_key", "resolved_peak_path"]].drop_duplicates(subset=["event_key"]).reset_index(drop=True)
     peak_grids = _load_peak_grids(peak_manifest)
+    if include_velocity_targets:
+        velx_manifest = event_frame[["event_key", "resolved_velx_path"]].drop_duplicates(subset=["event_key"]).reset_index(drop=True)
+        vely_manifest = event_frame[["event_key", "resolved_vely_path"]].drop_duplicates(subset=["event_key"]).reset_index(drop=True)
+        velocity_x_grids = _load_peak_grids(velx_manifest, resolved_path_column="resolved_velx_path")
+        velocity_y_grids = _load_peak_grids(vely_manifest, resolved_path_column="resolved_vely_path")
+    if include_velocity_magnitude_target:
+        velmag_manifest = event_frame[["event_key", "resolved_velmag_path"]].drop_duplicates(subset=["event_key"]).reset_index(drop=True)
+        velocity_mag_grids = _load_peak_grids(velmag_manifest, resolved_path_column="resolved_velmag_path")
 
     train_event_keys = sorted(splits.train_df["event_key"].unique().tolist())
     event_mean, event_std = _fit_event_normalization(train_event_keys, event_arrays)
@@ -370,6 +440,9 @@ def prepare_blockwise_matrix_datasets(
             block_windows,
             final_target_shape,
             static_feature_array,
+            velocity_x_grids,
+            velocity_y_grids,
+            velocity_mag_grids,
         ),
         val_dataset=BlockwiseFloodMatrixDataset(
             splits.val_df,
@@ -380,6 +453,9 @@ def prepare_blockwise_matrix_datasets(
             block_windows,
             final_target_shape,
             static_feature_array,
+            velocity_x_grids,
+            velocity_y_grids,
+            velocity_mag_grids,
         ),
         test_dataset=BlockwiseFloodMatrixDataset(
             splits.test_df,
@@ -390,6 +466,9 @@ def prepare_blockwise_matrix_datasets(
             block_windows,
             final_target_shape,
             static_feature_array,
+            velocity_x_grids,
+            velocity_y_grids,
+            velocity_mag_grids,
         ),
         feature_columns=feature_columns,
         event_shape=sample_event_shape,
@@ -402,4 +481,6 @@ def prepare_blockwise_matrix_datasets(
         ),
         splits=splits,
         static_raster_channels=static_raster_channels,
+        has_velocity_targets=include_velocity_targets,
+        has_velocity_magnitude_target=include_velocity_magnitude_target,
     )

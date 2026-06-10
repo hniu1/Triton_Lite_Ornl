@@ -54,7 +54,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth-weight-alpha", type=float, default=0.0)
     parser.add_argument("--depth-weight-cap", type=float, default=3.0)
     parser.add_argument("--aux-wet-loss-weight", type=float, default=0.2)
+    parser.add_argument("--aux-velocity-loss-weight", type=float, default=0.0)
+    parser.add_argument("--aux-velocity-mag-loss-weight", type=float, default=0.0)
     parser.add_argument("--wet-threshold", type=float, default=0.05)
+    parser.add_argument("--velocity-huber-delta", type=float, default=0.25)
+    parser.add_argument("--predict-velocity", action="store_true")
+    parser.add_argument("--predict-velocity-magnitude", action="store_true")
+    parser.add_argument("--velocity-x-manifest-column", type=str, default="path_to_peak_velx_10m")
+    parser.add_argument("--velocity-y-manifest-column", type=str, default="path_to_peak_vely_10m")
+    parser.add_argument("--velocity-mag-manifest-column", type=str, default="path_to_peak_velmag_10m")
     parser.add_argument("--early-stop-patience", type=int, default=12)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--device", type=str, default="auto", choices=["auto", "cpu", "cuda"])
@@ -95,7 +103,15 @@ def parse_args_defaults() -> Dict[str, object]:
     parser.add_argument("--depth-weight-alpha", type=float, default=0.0)
     parser.add_argument("--depth-weight-cap", type=float, default=3.0)
     parser.add_argument("--aux-wet-loss-weight", type=float, default=0.2)
+    parser.add_argument("--aux-velocity-loss-weight", type=float, default=0.0)
+    parser.add_argument("--aux-velocity-mag-loss-weight", type=float, default=0.0)
     parser.add_argument("--wet-threshold", type=float, default=0.05)
+    parser.add_argument("--velocity-huber-delta", type=float, default=0.25)
+    parser.add_argument("--predict-velocity", action="store_true")
+    parser.add_argument("--predict-velocity-magnitude", action="store_true")
+    parser.add_argument("--velocity-x-manifest-column", type=str, default="path_to_peak_velx_10m")
+    parser.add_argument("--velocity-y-manifest-column", type=str, default="path_to_peak_vely_10m")
+    parser.add_argument("--velocity-mag-manifest-column", type=str, default="path_to_peak_velmag_10m")
     parser.add_argument("--early-stop-patience", type=int, default=12)
     defaults = parser.parse_args([])
     return vars(defaults)
@@ -211,7 +227,10 @@ def run_epoch(
     depth_weight_alpha: float = 0.0,
     depth_weight_cap: float = 3.0,
     aux_wet_loss_weight: float = 0.2,
+    aux_velocity_loss_weight: float = 0.0,
+    aux_velocity_mag_loss_weight: float = 0.0,
     wet_threshold: float = 0.05,
+    velocity_huber_delta: float = 0.25,
 ) -> Dict[str, float]:
     is_train = optimizer is not None
     model.train(is_train)
@@ -219,27 +238,54 @@ def run_epoch(
     total_loss = 0.0
     total_depth_loss = 0.0
     total_wet_loss = 0.0
+    total_velocity_x_loss = 0.0
+    total_velocity_y_loss = 0.0
+    total_velocity_mag_loss = 0.0
     predictions = []
     targets = []
     masks = []
 
     for batch in loader:
-        if len(batch) == 5:
-            event_tensor, block_features, block_mask, target_map, static_raster = batch
+        event_tensor, block_features, block_mask, target_map = batch[:4]
+        cursor = 4
+        target_velx = None
+        target_vely = None
+        target_velmag = None
+        if model.predict_velocity:
+            target_velx = batch[cursor]
+            target_vely = batch[cursor + 1]
+            cursor += 2
+        if model.predict_velocity_magnitude:
+            target_velmag = batch[cursor]
+            cursor += 1
+        static_raster = batch[cursor] if len(batch) > cursor else None
+
+        if static_raster is not None:
             static_raster = static_raster.to(device)
-        else:
-            event_tensor, block_features, block_mask, target_map = batch
-            static_raster = None
         event_tensor = event_tensor.to(device)
         block_features = block_features.to(device)
         block_mask = block_mask.to(device)
         target_map = target_map.to(device)
+        if target_velx is not None:
+            target_velx = target_velx.to(device)
+        if target_vely is not None:
+            target_vely = target_vely.to(device)
+        if target_velmag is not None:
+            target_velmag = target_velmag.to(device)
 
         if is_train:
             optimizer.zero_grad()
 
         with torch.set_grad_enabled(is_train):
-            prediction_map, wet_logits = model(event_tensor, block_features, block_mask, static_raster)
+            model_outputs = model(event_tensor, block_features, block_mask, static_raster)
+            prediction_map = model_outputs[0]
+            wet_logits = model_outputs[1]
+            velocity_x_map = model_outputs[2] if model.predict_velocity else None
+            velocity_y_map = model_outputs[3] if model.predict_velocity else None
+            velocity_mag_map = None
+            if model.predict_velocity_magnitude:
+                velocity_mag_map = model_outputs[4] if model.predict_velocity else model_outputs[2]
+
             depth_loss = masked_huber_loss(
                 prediction_map,
                 target_map,
@@ -254,7 +300,38 @@ def run_epoch(
                 block_mask,
                 wet_threshold=wet_threshold,
             )
-            loss = depth_loss + (aux_wet_loss_weight * wet_loss)
+
+            velocity_x_loss = torch.tensor(0.0, device=device)
+            velocity_y_loss = torch.tensor(0.0, device=device)
+            if model.predict_velocity and velocity_x_map is not None and velocity_y_map is not None and target_velx is not None and target_vely is not None:
+                velocity_x_loss = masked_huber_loss(
+                    velocity_x_map,
+                    target_velx,
+                    block_mask,
+                    delta=velocity_huber_delta,
+                )
+                velocity_y_loss = masked_huber_loss(
+                    velocity_y_map,
+                    target_vely,
+                    block_mask,
+                    delta=velocity_huber_delta,
+                )
+
+            velocity_mag_loss = torch.tensor(0.0, device=device)
+            if model.predict_velocity_magnitude and velocity_mag_map is not None and target_velmag is not None:
+                velocity_mag_loss = masked_huber_loss(
+                    velocity_mag_map,
+                    target_velmag,
+                    block_mask,
+                    delta=velocity_huber_delta,
+                )
+
+            loss = (
+                depth_loss
+                + (aux_wet_loss_weight * wet_loss)
+                + (aux_velocity_loss_weight * (velocity_x_loss + velocity_y_loss))
+                + (aux_velocity_mag_loss_weight * velocity_mag_loss)
+            )
             if is_train:
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -263,6 +340,9 @@ def run_epoch(
         total_loss += loss.item() * event_tensor.shape[0]
         total_depth_loss += depth_loss.item() * event_tensor.shape[0]
         total_wet_loss += wet_loss.item() * event_tensor.shape[0]
+        total_velocity_x_loss += velocity_x_loss.item() * event_tensor.shape[0]
+        total_velocity_y_loss += velocity_y_loss.item() * event_tensor.shape[0]
+        total_velocity_mag_loss += velocity_mag_loss.item() * event_tensor.shape[0]
         predictions.append(prediction_map.detach().cpu().numpy())
         targets.append(target_map.detach().cpu().numpy())
         masks.append(block_mask.detach().cpu().numpy())
@@ -274,6 +354,9 @@ def run_epoch(
     metrics["loss"] = total_loss / len(loader.dataset)
     metrics["depth_loss"] = total_depth_loss / len(loader.dataset)
     metrics["wet_bce"] = total_wet_loss / len(loader.dataset)
+    metrics["velocity_x_loss"] = total_velocity_x_loss / len(loader.dataset)
+    metrics["velocity_y_loss"] = total_velocity_y_loss / len(loader.dataset)
+    metrics["velocity_mag_loss"] = total_velocity_mag_loss / len(loader.dataset)
     return metrics
 
 
@@ -320,7 +403,15 @@ def save_run_config(args: argparse.Namespace, bundle: BlockwiseMatrixDataBundle,
         "depth_weight_alpha": args.depth_weight_alpha,
         "depth_weight_cap": args.depth_weight_cap,
         "aux_wet_loss_weight": args.aux_wet_loss_weight,
+        "aux_velocity_loss_weight": args.aux_velocity_loss_weight,
+        "aux_velocity_mag_loss_weight": args.aux_velocity_mag_loss_weight,
         "wet_threshold": args.wet_threshold,
+        "velocity_huber_delta": args.velocity_huber_delta,
+        "predict_velocity": args.predict_velocity,
+        "predict_velocity_magnitude": args.predict_velocity_magnitude,
+        "velocity_x_manifest_column": args.velocity_x_manifest_column,
+        "velocity_y_manifest_column": args.velocity_y_manifest_column,
+        "velocity_mag_manifest_column": args.velocity_mag_manifest_column,
         "target_shape": list(bundle.target_shape),
         "event_shape": list(bundle.event_shape),
         "train_samples": len(bundle.train_dataset),
@@ -329,6 +420,8 @@ def save_run_config(args: argparse.Namespace, bundle: BlockwiseMatrixDataBundle,
         "static_rasters_dir": str(args.static_rasters_dir) if args.static_rasters_dir else None,
         "static_raster_channels": bundle.static_raster_channels,
         "raster_enc_channels": args.raster_enc_channels,
+        "has_velocity_targets": bundle.has_velocity_targets,
+        "has_velocity_magnitude_target": bundle.has_velocity_magnitude_target,
     }
     (output_dir / "run_config.json").write_text(json.dumps(config, indent=2))
 
@@ -359,6 +452,11 @@ def main() -> None:
         target_rows=args.target_rows,
         target_cols=args.target_cols,
         static_rasters_dir=args.static_rasters_dir.resolve() if args.static_rasters_dir else None,
+        include_velocity_targets=args.predict_velocity,
+        include_velocity_magnitude_target=args.predict_velocity_magnitude,
+        velocity_x_manifest_column=args.velocity_x_manifest_column,
+        velocity_y_manifest_column=args.velocity_y_manifest_column,
+        velocity_mag_manifest_column=args.velocity_mag_manifest_column,
     )
 
     save_split_tables(bundle, output_dir)
@@ -385,6 +483,8 @@ def main() -> None:
         dropout=args.dropout,
         static_raster_channels=bundle.static_raster_channels,
         raster_enc_channels=args.raster_enc_channels,
+        predict_velocity=args.predict_velocity,
+        predict_velocity_magnitude=args.predict_velocity_magnitude,
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -412,6 +512,14 @@ def main() -> None:
     print(
         f"[Loss] aux_wet_loss_weight={args.aux_wet_loss_weight} wet_threshold={args.wet_threshold}"
     )
+    if args.predict_velocity:
+        print(
+            f"[Loss] aux_velocity_loss_weight={args.aux_velocity_loss_weight} velocity_huber_delta={args.velocity_huber_delta}"
+        )
+    if args.predict_velocity_magnitude:
+        print(
+            f"[Loss] aux_velocity_mag_loss_weight={args.aux_velocity_mag_loss_weight}"
+        )
 
     for epoch in range(1, args.epochs + 1):
         train_metrics = run_epoch(
@@ -423,7 +531,10 @@ def main() -> None:
             depth_weight_alpha=args.depth_weight_alpha,
             depth_weight_cap=args.depth_weight_cap,
             aux_wet_loss_weight=args.aux_wet_loss_weight,
+            aux_velocity_loss_weight=args.aux_velocity_loss_weight,
+            aux_velocity_mag_loss_weight=args.aux_velocity_mag_loss_weight,
             wet_threshold=args.wet_threshold,
+            velocity_huber_delta=args.velocity_huber_delta,
         )
         val_metrics = run_epoch(
             model,
@@ -434,7 +545,10 @@ def main() -> None:
             depth_weight_alpha=args.depth_weight_alpha,
             depth_weight_cap=args.depth_weight_cap,
             aux_wet_loss_weight=args.aux_wet_loss_weight,
+            aux_velocity_loss_weight=args.aux_velocity_loss_weight,
+            aux_velocity_mag_loss_weight=args.aux_velocity_mag_loss_weight,
             wet_threshold=args.wet_threshold,
+            velocity_huber_delta=args.velocity_huber_delta,
         )
         record = {"epoch": epoch, "train": train_metrics, "val": val_metrics}
         history.append(record)
@@ -443,8 +557,10 @@ def main() -> None:
             f"epoch {epoch:03d} "
                 f"train_loss={train_metrics['loss']:.6f} train_rmse={train_metrics['rmse']:.6f} "
                 f"train_wet_bce={train_metrics['wet_bce']:.6f} "
+                f"train_vx={train_metrics['velocity_x_loss']:.6f} train_vy={train_metrics['velocity_y_loss']:.6f} "
                 f"val_loss={val_metrics['loss']:.6f} val_rmse={val_metrics['rmse']:.6f} "
-                f"val_wet_bce={val_metrics['wet_bce']:.6f}"
+                f"val_wet_bce={val_metrics['wet_bce']:.6f} "
+                f"val_vx={val_metrics['velocity_x_loss']:.6f} val_vy={val_metrics['velocity_y_loss']:.6f}"
         )
 
         if val_metrics["loss"] < best_val_loss - 1e-8:
@@ -466,6 +582,8 @@ def main() -> None:
                         "dropout": args.dropout,
                         "static_raster_channels": bundle.static_raster_channels,
                         "raster_enc_channels": args.raster_enc_channels,
+                        "predict_velocity": args.predict_velocity,
+                        "predict_velocity_magnitude": args.predict_velocity_magnitude,
                     },
                     "feature_columns": bundle.feature_columns,
                     "event_shape": bundle.event_shape,
@@ -492,7 +610,10 @@ def main() -> None:
         depth_weight_alpha=args.depth_weight_alpha,
         depth_weight_cap=args.depth_weight_cap,
         aux_wet_loss_weight=args.aux_wet_loss_weight,
+        aux_velocity_loss_weight=args.aux_velocity_loss_weight,
+        aux_velocity_mag_loss_weight=args.aux_velocity_mag_loss_weight,
         wet_threshold=args.wet_threshold,
+        velocity_huber_delta=args.velocity_huber_delta,
     )
     test_metrics = run_epoch(
         model,
@@ -503,7 +624,10 @@ def main() -> None:
         depth_weight_alpha=args.depth_weight_alpha,
         depth_weight_cap=args.depth_weight_cap,
         aux_wet_loss_weight=args.aux_wet_loss_weight,
+        aux_velocity_loss_weight=args.aux_velocity_loss_weight,
+        aux_velocity_mag_loss_weight=args.aux_velocity_mag_loss_weight,
         wet_threshold=args.wet_threshold,
+        velocity_huber_delta=args.velocity_huber_delta,
     )
 
     metrics_payload = {

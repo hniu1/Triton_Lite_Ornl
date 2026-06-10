@@ -102,6 +102,8 @@ class BlockwiseFloodMatrixModel(nn.Module):
         dropout: float = 0.1,
         static_raster_channels: int = 0,
         raster_enc_channels: int = 16,
+        predict_velocity: bool = False,
+        predict_velocity_magnitude: bool = False,
     ) -> None:
         super().__init__()
         if target_rows != 80 or target_cols != 80:
@@ -111,6 +113,8 @@ class BlockwiseFloodMatrixModel(nn.Module):
 
         self.target_rows = target_rows
         self.target_cols = target_cols
+        self.predict_velocity = predict_velocity
+        self.predict_velocity_magnitude = predict_velocity_magnitude
         self.temporal_encoder = TemporalEncoder(
             input_features=event_features,
             hidden_channels=temporal_channels,
@@ -157,6 +161,29 @@ class BlockwiseFloodMatrixModel(nn.Module):
             nn.ReLU(),
             nn.Conv2d(decoder_base_channels // 8, 1, kernel_size=1),
         )
+        if self.predict_velocity:
+            self.velocity_x_head = nn.Sequential(
+                nn.Conv2d(head_channels, decoder_base_channels // 8, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(decoder_base_channels // 8, 1, kernel_size=1),
+            )
+            self.velocity_y_head = nn.Sequential(
+                nn.Conv2d(head_channels, decoder_base_channels // 8, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(decoder_base_channels // 8, 1, kernel_size=1),
+            )
+        else:
+            self.velocity_x_head = None  # type: ignore[assignment]
+            self.velocity_y_head = None  # type: ignore[assignment]
+
+        if self.predict_velocity_magnitude:
+            self.velocity_magnitude_head = nn.Sequential(
+                nn.Conv2d(head_channels, decoder_base_channels // 8, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv2d(decoder_base_channels // 8, 1, kernel_size=1),
+            )
+        else:
+            self.velocity_magnitude_head = None  # type: ignore[assignment]
         self.output_activation = nn.Softplus()
 
     def _coordinate_channels(self, batch_size: int, device: torch.device) -> torch.Tensor:
@@ -172,7 +199,7 @@ class BlockwiseFloodMatrixModel(nn.Module):
         block_features: torch.Tensor,
         block_mask: torch.Tensor,
         static_raster: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple:
         event_embedding = self.temporal_encoder(event_tensor)
         block_embedding = self.block_encoder(block_features)
         fused = torch.cat([event_embedding, block_embedding], dim=-1)
@@ -196,4 +223,15 @@ class BlockwiseFloodMatrixModel(nn.Module):
         depth_logits = self.depth_head(fused_map)
         wet_logits = self.wet_head(fused_map).squeeze(1)
         depth_map = self.output_activation(depth_logits).squeeze(1) * block_mask
-        return depth_map, wet_logits
+
+        outputs = [depth_map, wet_logits]
+        if self.predict_velocity and self.velocity_x_head is not None and self.velocity_y_head is not None:
+            velocity_x_map = self.velocity_x_head(fused_map).squeeze(1) * block_mask
+            velocity_y_map = self.velocity_y_head(fused_map).squeeze(1) * block_mask
+            outputs.extend([velocity_x_map, velocity_y_map])
+
+        if self.predict_velocity_magnitude and self.velocity_magnitude_head is not None:
+            velocity_magnitude_map = self.output_activation(self.velocity_magnitude_head(fused_map)).squeeze(1) * block_mask
+            outputs.append(velocity_magnitude_map)
+
+        return tuple(outputs)

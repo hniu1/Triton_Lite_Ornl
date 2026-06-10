@@ -77,6 +77,30 @@ def compute_event_peak_grid(var: nc4.Variable, time_chunk_size: int = 4) -> np.n
     return peak_grid
 
 
+def compute_event_peak_grid_abs(var: nc4.Variable, time_chunk_size: int = 4) -> np.ndarray:
+    """Compute event-level maximum absolute value grid (useful for velocity components
+    that can be negative)."""
+    peak_grid: Optional[np.ndarray] = None
+    for time_start in range(0, var.shape[0], time_chunk_size):
+        time_stop = min(var.shape[0], time_start + time_chunk_size)
+        frame = var[time_start:time_stop, :, :]
+        if np.ma.isMaskedArray(frame):
+            frame_values = frame.filled(np.nan).astype(np.float32, copy=False)
+        else:
+            frame_values = np.asarray(frame, dtype=np.float32)
+            frame_values[~np.isfinite(frame_values)] = np.nan
+
+        frame_peak = np.fmax.reduce(np.abs(frame_values), axis=0)
+        if peak_grid is None:
+            peak_grid = frame_peak.copy()
+            continue
+        np.fmax(peak_grid, frame_peak, out=peak_grid)
+
+    if peak_grid is None:
+        raise ValueError("Encountered netCDF variable with zero timesteps")
+    return peak_grid
+
+
 def build_block_index_raster(
     blocks_file: Path,
     transform: Affine,
@@ -149,6 +173,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--netcdf-dir", type=Path, required=True)
     parser.add_argument("--netcdf-pattern", type=str, default="D*_ACC_future.nc")
     parser.add_argument("--depth-var", type=str, default="output_depth")
+    parser.add_argument("--velocity-x-var", type=str, default="output_velocity_x")
+    parser.add_argument("--velocity-y-var", type=str, default="output_velocity_y")
+    parser.add_argument(
+        "--include-velocity",
+        action="store_true",
+        help="Also compute and save peak velocity-x and velocity-y rasters",
+    )
+    parser.add_argument(
+        "--include-velocity-magnitude",
+        action="store_true",
+        help="Also compute and save peak velocity magnitude raster (requires --include-velocity)",
+    )
     parser.add_argument("--max-events", type=int, default=None)
 
     parser.add_argument("--blocks-file", type=Path, required=True)
@@ -186,6 +222,9 @@ def main() -> None:
     peaks_dir = args.output_dir / "events_peak_10m"
     peaks_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.include_velocity_magnitude and not args.include_velocity:
+        raise ValueError("--include-velocity-magnitude requires --include-velocity")
+
     block_index, block_lookup = build_block_index_raster(
         blocks_file=args.blocks_file,
         transform=transform,
@@ -211,18 +250,44 @@ def main() -> None:
                 raise ValueError(f"Variable '{args.depth_var}' missing in {nc_path}")
             peak_grid = compute_event_peak_grid(ds.variables[args.depth_var])
 
+            velx_peak_grid: Optional[np.ndarray] = None
+            vely_peak_grid: Optional[np.ndarray] = None
+            velmag_peak_grid: Optional[np.ndarray] = None
+            if args.include_velocity:
+                for vel_var, name in [(args.velocity_x_var, "velocity-x"), (args.velocity_y_var, "velocity-y")]:
+                    if vel_var not in ds.variables:
+                        raise ValueError(
+                            f"--include-velocity was set but variable '{vel_var}' is missing in {nc_path}. "
+                            "Re-run m0 with --output-types H U V to add velocity to netCDF files."
+                        )
+                velx_peak_grid = compute_event_peak_grid_abs(ds.variables[args.velocity_x_var])
+                vely_peak_grid = compute_event_peak_grid_abs(ds.variables[args.velocity_y_var])
+                if args.include_velocity_magnitude:
+                    velmag_peak_grid = np.sqrt(velx_peak_grid ** 2 + vely_peak_grid ** 2).astype(np.float32)
+
         peak_path = peaks_dir / f"{event_id}_peak_10m.npy"
         np.save(peak_path, peak_grid)
-        manifest_rows.append(
-            {
-                "event_id": event_id,
-                "watershed_id": watershed_id,
-                "path_to_peak_10m": str(peak_path),
-                "rows": int(peak_grid.shape[0]),
-                "cols": int(peak_grid.shape[1]),
-            }
-        )
-        LOGGER.info("Wrote 10m peak raster for event %s -> %s", event_id, peak_path)
+        row: Dict[str, object] = {
+            "event_id": event_id,
+            "watershed_id": watershed_id,
+            "path_to_peak_10m": str(peak_path),
+            "rows": int(peak_grid.shape[0]),
+            "cols": int(peak_grid.shape[1]),
+        }
+        if args.include_velocity and velx_peak_grid is not None and vely_peak_grid is not None:
+            velx_path = peaks_dir / f"{event_id}_peak_velx_10m.npy"
+            vely_path = peaks_dir / f"{event_id}_peak_vely_10m.npy"
+            np.save(velx_path, velx_peak_grid)
+            np.save(vely_path, vely_peak_grid)
+            row["path_to_peak_velx_10m"] = str(velx_path)
+            row["path_to_peak_vely_10m"] = str(vely_path)
+        if args.include_velocity_magnitude and velmag_peak_grid is not None:
+            velmag_path = peaks_dir / f"{event_id}_peak_velmag_10m.npy"
+            np.save(velmag_path, velmag_peak_grid)
+            row["path_to_peak_velmag_10m"] = str(velmag_path)
+
+        manifest_rows.append(row)
+        LOGGER.info("Wrote 10m peak rasters for event %s", event_id)
 
     manifest = pd.DataFrame(manifest_rows).sort_values(["watershed_id", "event_id"]).reset_index(drop=True)
     manifest.to_parquet(args.output_dir / "labels_10m_manifest.parquet", index=False)

@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import netCDF4 as nc4
 import numpy as np
@@ -58,24 +58,33 @@ def parse_time_origin(raw: str) -> datetime:
     return datetime.fromisoformat(raw)
 
 
-def unzip_selected(zip_path: Path, output_path: Path, output_type: str) -> List[str]:
+# Maps output_type prefix to netCDF variable name and long_name
+OUTPUT_TYPE_META: Dict[str, Dict[str, str]] = {
+    "H": {"varname": "output_depth", "long_name": "flood_depth", "units": "m", "standard_name": "Depth"},
+    "U": {"varname": "output_velocity_x", "long_name": "flood_velocity_x", "units": "m s-1", "standard_name": "VelocityX"},
+    "V": {"varname": "output_velocity_y", "long_name": "flood_velocity_y", "units": "m s-1", "standard_name": "VelocityY"},
+}
+
+
+def unzip_selected_multi(zip_path: Path, output_path: Path, output_types: Sequence[str]) -> None:
     output_path.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as zf:
-        selected = [
-            name for name in zf.namelist()
-            if name.split("/")[-1].startswith(output_type) and name.endswith(".dat")
-        ]
-        for name in selected:
-            zf.extract(name, output_path)
-    LOGGER.info("Extracted %d %s*.dat files from %s", len(selected), output_type, zip_path)
-    return selected
+        for output_type in output_types:
+            prefix = f"{output_type}_"
+            selected = [
+                name for name in zf.namelist()
+                if name.split("/")[-1].startswith(prefix) and name.endswith(".dat")
+            ]
+            for name in selected:
+                zf.extract(name, output_path)
+            LOGGER.info("Extracted %d %s*.dat files from %s", len(selected), output_type, zip_path)
 
 
 def get_output_files(dat_path: Path, output_type: str) -> List[Path]:
     files = sorted(
-        Path(p) for p in glob.glob(str(dat_path / "*" / "output" / "flood2d" / "bin" / f"{output_type}*.dat"))
+        Path(p) for p in glob.glob(str(dat_path / "*" / "output" / "flood2d" / "bin" / f"{output_type}_*.dat"))
     )
-    LOGGER.info("Found %d binary output files", len(files))
+    LOGGER.info("Found %d binary output files for type %s", len(files), output_type)
     return files
 
 
@@ -141,7 +150,7 @@ def add_time_variable(
 
 def create_netcdf(
     output_path: Path,
-    output_files: Sequence[Path],
+    output_files_by_type: Dict[str, List[Path]],
     cols: int,
     rows: int,
     gt: Sequence[float],
@@ -154,6 +163,10 @@ def create_netcdf(
     out_interval_sec: int,
     crs_wkt: str,
 ) -> None:
+    """Write all output types (H, U, V, ...) into one netCDF file."""
+    # Use depth (H) file count for out_time dimension; all types must have same count.
+    primary_type = next(iter(output_files_by_type))
+    n_out_steps = len(output_files_by_type[primary_type])
     xarr, yarr = build_coordinate_arrays(cols, rows, gt)
 
     with nc4.Dataset(output_path, "w", format="NETCDF4", diskless=False) as nc:
@@ -191,38 +204,54 @@ def create_netcdf(
             dim_name="out_time",
             ref_time_units=ref_time_units,
             time_origin=time_origin,
-            n_steps=len(output_files),
+            n_steps=n_out_steps,
             interval_sec=out_interval_sec,
             start_offset_steps=1,
             bound_width_hr=0.25,
         )
 
-        out_depth = nc.createVariable(
-            "output_depth",
-            "f4",
-            ("out_time", "y", "x"),
-            zlib=True,
-            complevel=4,
-            fill_value=-9999.0,
-        )
-        out_depth.grid_mapping = grid_mapping_name
-        out_depth.standard_name = "Depth"
-        out_depth.long_name = f"flood_depth_{output_path.name}"
-        out_depth.units = "m"
+        for output_type, output_files in output_files_by_type.items():
+            meta = OUTPUT_TYPE_META.get(output_type, {
+                "varname": f"output_{output_type.lower()}",
+                "long_name": f"flood_{output_type.lower()}",
+                "units": "unknown",
+                "standard_name": output_type,
+            })
+            nc_var = nc.createVariable(
+                meta["varname"],
+                "f4",
+                ("out_time", "y", "x"),
+                zlib=True,
+                complevel=4,
+                fill_value=-9999.0,
+            )
+            nc_var.grid_mapping = grid_mapping_name
+            nc_var.standard_name = meta["standard_name"]
+            nc_var.long_name = f"{meta['long_name']}_{output_path.name}"
+            nc_var.units = meta["units"]
 
-        for i, output_file in enumerate(output_files):
-            arr = bin2array(output_file, rows=rows, cols=cols, threshold=threshold, pad=pad)
-            arr[np.isnan(arr)] = -9999.0
-            out_depth[i, :, :] = arr
-            if (i + 1) % 50 == 0 or (i + 1) == len(output_files):
-                LOGGER.info("Wrote %d/%d output depth slices to %s", i + 1, len(output_files), output_path)
+            if len(output_files) != n_out_steps:
+                raise ValueError(
+                    f"Output type '{output_type}' has {len(output_files)} files but primary type "
+                    f"'{primary_type}' has {n_out_steps}; counts must match."
+                )
+
+            for i, output_file in enumerate(output_files):
+                arr = bin2array(output_file, rows=rows, cols=cols, threshold=threshold, pad=pad)
+                arr[np.isnan(arr)] = -9999.0
+                nc_var[i, :, :] = arr
+                if (i + 1) % 50 == 0 or (i + 1) == n_out_steps:
+                    LOGGER.info(
+                        "Wrote %d/%d slices for var '%s' to %s",
+                        i + 1, n_out_steps, meta["varname"], output_path,
+                    )
             nc.sync()
 
 
 def process_zip(
     zip_path: Path,
     output_dir: Path,
-    output_type: str,
+    output_types: Sequence[str],
     cols: int,
     rows: int,
     gt: Sequence[float],
@@ -241,13 +270,18 @@ def process_zip(
 
     with tempfile.TemporaryDirectory(prefix=f"{event_id}_", dir=output_dir) as temp_dir_raw:
         temp_dir = Path(temp_dir_raw)
-        unzip_selected(zip_path, temp_dir, output_type)
-        output_files = get_output_files(temp_dir, output_type)
-        if not output_files:
-            raise FileNotFoundError(f"No {output_type}*.dat files found after extracting {zip_path}")
+        unzip_selected_multi(zip_path, temp_dir, output_types)
+        output_files_by_type: Dict[str, List[Path]] = {}
+        for output_type in output_types:
+            files = get_output_files(temp_dir, output_type)
+            if not files:
+                raise FileNotFoundError(
+                    f"No {output_type}_*.dat files found after extracting {zip_path}"
+                )
+            output_files_by_type[output_type] = files
         create_netcdf(
             output_path=output_path,
-            output_files=output_files,
+            output_files_by_type=output_files_by_type,
             cols=cols,
             rows=rows,
             gt=gt,
@@ -270,7 +304,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--zip-dir", type=Path, default=Path(CONASAUGA_DEFAULT_ZIP_DIR))
     parser.add_argument("--zip-pattern", type=str, default="D*.zip")
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--output-type", type=str, default="H")
+    parser.add_argument(
+        "--output-types",
+        nargs="+",
+        default=["H"],
+        help="Output type prefixes to extract and write; e.g. H U V (default: H only for backward compat)",
+    )
     parser.add_argument("--cols", type=int, default=CONASAUGA_DEFAULT_COLS)
     parser.add_argument("--rows", type=int, default=CONASAUGA_DEFAULT_ROWS)
     parser.add_argument("--gt", nargs=6, type=float, default=list(CONASAUGA_DEFAULT_GT))
@@ -319,7 +358,7 @@ def main() -> None:
         process_zip(
             zip_path=zip_path,
             output_dir=output_dir,
-            output_type=args.output_type,
+            output_types=args.output_types,
             cols=args.cols,
             rows=args.rows,
             gt=args.gt,
