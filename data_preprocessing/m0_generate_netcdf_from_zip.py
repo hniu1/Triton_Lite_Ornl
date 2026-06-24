@@ -89,8 +89,23 @@ def get_output_files(dat_path: Path, output_type: str) -> List[Path]:
 
 
 def bin2array(bin_file: Path, rows: int, cols: int, threshold: float, pad: int) -> np.ndarray:
-    array = np.fromfile(bin_file, dtype=np.float32)
-    array = array.reshape((rows + 2 * pad, cols + 2 * pad))
+    full_rows = rows + 2 * pad
+    full_cols = cols + 2 * pad
+    expected_cells = full_rows * full_cols
+    file_size = bin_file.stat().st_size
+
+    if file_size == expected_cells * 4:
+        dtype = np.float32
+    elif file_size == expected_cells * 8:
+        dtype = np.float64
+    else:
+        raise ValueError(
+            f"Unexpected file size for {bin_file}: {file_size} bytes; "
+            f"expected {expected_cells * 4} (float32) or {expected_cells * 8} (float64)"
+        )
+
+    array = np.fromfile(bin_file, dtype=dtype)
+    array = array.reshape((full_rows, full_cols)).astype(np.float32, copy=False)
     array = array[pad : rows + pad, pad : cols + pad]
     array = np.where(array > threshold, array, np.nan)
     return array
@@ -162,8 +177,15 @@ def create_netcdf(
     in_interval_sec: int,
     out_interval_sec: int,
     crs_wkt: str,
+    compression_level: int,
+    sync_every: int,
 ) -> None:
-    """Write all output types (H, U, V, ...) into one netCDF file."""
+    """Write all output types (H, U, V, ...) into one netCDF file.
+
+    Performance notes:
+    - Lower compression_level speeds up writing on large events.
+    - sync_every=0 disables periodic sync and only flushes when file is closed.
+    """
     # Use depth (H) file count for out_time dimension; all types must have same count.
     primary_type = next(iter(output_files_by_type))
     n_out_steps = len(output_files_by_type[primary_type])
@@ -217,12 +239,13 @@ def create_netcdf(
                 "units": "unknown",
                 "standard_name": output_type,
             })
+            use_compression = compression_level > 0
             nc_var = nc.createVariable(
                 meta["varname"],
                 "f4",
                 ("out_time", "y", "x"),
-                zlib=True,
-                complevel=4,
+                zlib=use_compression,
+                complevel=max(1, compression_level) if use_compression else 1,
                 fill_value=-9999.0,
             )
             nc_var.grid_mapping = grid_mapping_name
@@ -245,6 +268,10 @@ def create_netcdf(
                         "Wrote %d/%d slices for var '%s' to %s",
                         i + 1, n_out_steps, meta["varname"], output_path,
                     )
+                if sync_every > 0 and (i + 1) % sync_every == 0:
+                    nc.sync()
+
+        if sync_every > 0:
             nc.sync()
 
 
@@ -263,12 +290,19 @@ def process_zip(
     in_interval_sec: int,
     out_interval_sec: int,
     crs_wkt: str,
+    compression_level: int,
+    sync_every: int,
+    temp_root_dir: Path | None,
 ) -> Path:
     event_id = zip_path.stem
     nc_name = f"{event_id}_ACC_future.nc"
     output_path = output_dir / nc_name
 
-    with tempfile.TemporaryDirectory(prefix=f"{event_id}_", dir=output_dir) as temp_dir_raw:
+    # Use configurable temp root so large unzip staging does not exhaust node-local /tmp.
+    with tempfile.TemporaryDirectory(
+        prefix=f"{event_id}_",
+        dir=str(temp_root_dir) if temp_root_dir is not None else None,
+    ) as temp_dir_raw:
         temp_dir = Path(temp_dir_raw)
         unzip_selected_multi(zip_path, temp_dir, output_types)
         output_files_by_type: Dict[str, List[Path]] = {}
@@ -293,6 +327,8 @@ def process_zip(
             in_interval_sec=in_interval_sec,
             out_interval_sec=out_interval_sec,
             crs_wkt=crs_wkt,
+            compression_level=compression_level,
+            sync_every=sync_every,
         )
 
     LOGGER.info("Saved netCDF: %s", output_path)
@@ -321,6 +357,24 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--in-interval-sec", type=int, default=10800)
     parser.add_argument("--out-interval-sec", type=int, default=1800)
     parser.add_argument("--crs-wkt", type=str, default=CONASAUGA_DEFAULT_CRS_WKT)
+    parser.add_argument(
+        "--temp-root-dir",
+        type=Path,
+        default=None,
+        help="Optional directory for temporary unzip staging (recommended on large runs)",
+    )
+    parser.add_argument(
+        "--compression-level",
+        type=int,
+        default=1,
+        help="NetCDF zlib compression level (0 disables compression; faster write at cost of larger files)",
+    )
+    parser.add_argument(
+        "--sync-every",
+        type=int,
+        default=0,
+        help="Call nc.sync() every N slices per variable (0 disables periodic sync for faster IO)",
+    )
     parser.add_argument("--min-event-index", type=int, default=None)
     parser.add_argument("--max-events", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
@@ -334,6 +388,9 @@ def main() -> None:
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    temp_root_dir = args.temp_root_dir.resolve() if args.temp_root_dir is not None else None
+    if temp_root_dir is not None:
+        temp_root_dir.mkdir(parents=True, exist_ok=True)
 
     zip_files = sorted(args.zip_dir.glob(args.zip_pattern))
     if args.min_event_index is not None:
@@ -370,6 +427,9 @@ def main() -> None:
             in_interval_sec=args.in_interval_sec,
             out_interval_sec=args.out_interval_sec,
             crs_wkt=args.crs_wkt,
+            compression_level=args.compression_level,
+            sync_every=args.sync_every,
+            temp_root_dir=temp_root_dir,
         )
 
 
