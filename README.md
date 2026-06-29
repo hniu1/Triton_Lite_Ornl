@@ -1,12 +1,121 @@
 # Triton Lite Block-wise Surrogate
 
-This repository now centers on a block-wise flood-depth surrogate for Triton Lite.
-The active workflow is:
+## Dynamic Stage-1 pipeline
 
-- build event tensors from hydrologic inputs
-- build static block metadata/features
-- build 10m label assets from depth netCDF outputs
-- train one shared model that predicts an 80x80 depth field for one block at a time
+The Stage 1 model is a timestamp-conditioned surrogate. It streams full TRITON
+trajectories from netCDF and predicts one block-local hydraulic state at a
+requested event timestamp:
+
+```text
+hydrologic forcing through time t
++ requested timestamp t
++ scalar block attributes
++ static 10 m terrain rasters and block mask
+    -> depth(t), wet probability(t), component_x(t), component_y(t)
+```
+
+![Stage 1 timestamp-conditioned TRITON surrogate architecture](docs/images/stage1_timestamp_surrogate_architecture.png)
+
+The complete data/model contract and commands are documented in
+[`STAGE1_TIMESTAMP_SURROGATE.md`](STAGE1_TIMESTAMP_SURROGATE.md). The older
+workflow remains available as an event-peak baseline.
+
+### Stage 1 inputs
+
+Each sample represents one `(event_id, timestamp, block_id)` combination.
+
+| Input | Default shape | Purpose |
+|---|---:|---|
+| Hydrologic event | `480 x 300` | Ten days of forcing at 30-minute intervals for 300 source locations |
+| Requested time index | scalar | Selects the hydraulic state to predict |
+| Time features | `4` | Event fraction, sine/cosine position, and normalized elapsed hours |
+| Block attributes | `7` | Location and summary terrain/hydrologic properties |
+| Static terrain | `6 x 80 x 80` | DEM, flow accumulation, stream mask, distance to stream, slope, and relative elevation |
+| Block mask | `80 x 80` | Identifies valid cells and excludes padding |
+
+The complete event tensor is loaded for efficient batching, but the temporal
+network is causal: a prediction at time `t` cannot use forcing values after
+`t`. Event, block, and static-feature normalization statistics are computed
+from training events only.
+
+### Temporal and conditioning encoders
+
+The hydrologic forcing passes through an eight-layer temporal convolutional
+network (TCN). Kernel size 3 and dilations `1, 2, 4, ..., 128` give a 511-step
+receptive field, which covers the full 480-step event. Each block contains a
+causal convolution, per-timestamp LayerNorm, GELU activation, dropout, and a
+residual connection. LayerNorm is used instead of temporal BatchNorm to avoid
+leaking future timestamps through training-time statistics.
+
+The TCN representation at the requested timestamp is gathered as a
+128-dimensional event embedding. In parallel:
+
+- a small MLP converts the four time features to a 32-dimensional embedding;
+- a block MLP converts the scalar block attributes to a 64-dimensional embedding.
+
+These three vectors are concatenated (`128 + 32 + 64 = 224`) and projected to
+a 128-dimensional conditioning vector.
+
+### Conditioned spatial U-Net
+
+The six static rasters and block mask enter a three-level U-Net. With the
+default base width of 32 channels, the encoder produces feature maps at:
+
+```text
+32 x 80 x 80 -> 64 x 40 x 40 -> 128 x 20 x 20 -> 128 x 10 x 10
+```
+
+The 128-dimensional event/time/block conditioning vector is repeated across
+the `10 x 10` spatial grid and concatenated with the spatial latent map. The
+bottleneck and decoder then reconstruct an `80 x 80` representation using
+bilinear upsampling and U-Net skip connections. This design lets the event
+forcing control the hydraulic response while the terrain encoder determines
+where water can accumulate and move inside the block.
+
+### Outputs
+
+The shared decoder feeds three heads:
+
+- **Depth:** one nonnegative `80 x 80` map; `Softplus` enforces depth `>= 0`.
+- **Wet/dry:** one `80 x 80` logit map; sigmoid gives flood probability.
+- **Signed components:** two `80 x 80` maps for the x and y flow components.
+
+The component outputs are intentionally not called velocity in the model. The
+TRITON publication describes native U/V output as unit discharge, while the
+current netCDF metadata labels it velocity. This physical meaning must be
+audited before final training and publication.
+
+### Training objective
+
+The default loss combines five terms:
+
+```text
+L = wet-cell depth Huber
+  + 0.05 * dry-cell depth penalty
+  + 0.20 * wet/dry BCE
+  + 0.50 * wet-cell component Huber
+  + 0.05 * dry-cell component penalty
+```
+
+Cells with target depth at least `0.05 m` are considered wet by default. The
+dry-cell terms discourage artificial shallow flooding and nonzero flow in dry
+areas. Training batches share an event and timestamp and contain spatially
+nearby blocks, allowing the netCDF chunk cache to reuse data efficiently.
+
+### Scope of Stage 1
+
+Stage 1 predicts each requested timestamp independently. Earlier predicted
+depth or flow maps are **not** fed into later predictions, so prediction error
+does not recursively accumulate through all 480 steps. This makes Stage 1 a
+timestamp emulator rather than an autoregressive simulator; recurrent state
+propagation and cross-block hydraulic exchange belong to the planned Stage 2
+model.
+
+This repository contains two block-wise Triton Lite surrogate workflows:
+
+- the timestamp-conditioned Stage 1 model, which predicts depth and signed
+  flow-component fields at a requested time;
+- the event-peak baseline, which predicts one peak-depth field per event.
 
 The older watershed-level training, tuning, and prediction scripts have been removed.
 
@@ -18,24 +127,32 @@ The older watershed-level training, tuning, and prediction scripts have been rem
 │   ├── m1a_build_event_sources.py
 │   ├── m1b_event_to_tensor.py
 │   ├── m2_block_feature_extraction.py
+│   ├── m2_5_prepare_block_static_rasters.py
 │   ├── m3_prepare_10m_label_assets.py
+│   ├── m3_build_dynamic_manifest.py
 │   ├── README_m1_events.md
 │   ├── README_m2_blocks.md
 │   └── README_m3_labels_from_netcdf.md
+├── stage1_data.py                            # streaming timestamp/block dataset
+├── stage1_model.py                           # causal TCN + conditioned spatial U-Net
+├── stage1_train.py                           # Stage 1 training and evaluation
+├── stage1_predict.py                         # timestamp-conditioned inference
+├── 01_stage1_build_manifest.sh               # dynamic-manifest scheduler job
+├── 02_stage1_train.sh                        # Stage 1 training scheduler job
 ├── blockwise_data.py                       # shared split and normalization helpers
 ├── blockwise_matrix_data.py                # builds 80x80 block-local training samples
 ├── blockwise_model.py                      # temporal encoder + block encoder + 80x80 decoder
 ├── train_blockwise_matrix.py               # trains the 10m block-wise depth-field model
 ├── tune_blockwise_matrix.py                # tunes matrix-model hyperparameters
 ├── predict_blockwise_matrix.py             # writes matrix predictions from a trained model
-├── model.py                               # retained legacy watershed model definition
-├── data_loader.py                         # retained legacy watershed data loader
+├── STAGE1_TIMESTAMP_SURROGATE.md            # dynamic Stage 1 data/model contract
 └── README.md
 ```
 
-## Current Training Target
+## Event-peak baseline training target
 
-Each supervised sample is one `(event_id, watershed_id, block_id)` row with a spatial target:
+The older baseline uses one `(event_id, watershed_id, block_id)` row with an
+event-level spatial target:
 
 - `X_event`: event time series from Milestone 1, stored as `X_event.npy` with shape `T x F`
 - `X_block`: static block features from Milestone 2
