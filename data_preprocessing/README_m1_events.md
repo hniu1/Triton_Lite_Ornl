@@ -64,6 +64,18 @@ Optional for Step A:
 
 If no sensor map is provided, all detected `Loc*` columns are used in each event.
 
+## Timestamp Stage 1 Output
+
+The current consolidated Stage 1 event tensors are stored in:
+
+```text
+processed_data/timestamp_stage1/m1_events
+```
+
+This directory contains 40 Conasauga events.  Each `X_event.npy` has shape
+`480 x 300`, and `events.csv` points to the tensors inside the same consolidated
+directory.
+
 ## Example commands
 
 ### Step A: raw zip/txt to event source table

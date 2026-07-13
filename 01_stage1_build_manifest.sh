@@ -18,9 +18,9 @@ mkdir -p slurm_output
 python -u data_preprocessing/m3_build_dynamic_manifest.py \
   --netcdf-dir processed_data_depth_velocity/blockwise_global/milestone_00_netcdf_v3 \
   --netcdf-pattern 'D*_ACC_future.nc' \
-  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
-  --labels-10m-dir processed_data/blockwise_global/milestone_03_labels_10m \
+  --events-csv processed_data/timestamp_stage1/m1_events/events.csv \
+  --labels-10m-dir processed_data/timestamp_stage1/m3_labels_10m \
   --watershed-id conasauga \
-  --component-semantics unknown \
+  --component-semantics velocity \
   --skip-incomplete \
-  --output-dir processed_data_depth_velocity/blockwise_global/milestone_03_dynamic_manifest
+  --output-dir processed_data/timestamp_stage1/m3_dynamic_manifest

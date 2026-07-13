@@ -82,6 +82,21 @@ Required output columns:
 
 This table is the static lookup table for block-wise training and inference.
 
+## Timestamp Stage 1 Output
+
+The current consolidated Stage 1 block features are stored in:
+
+```text
+processed_data/timestamp_stage1/m2_blocks/blocks.parquet
+```
+
+The current Conasauga inventory contains 6,900 blocks.  The companion static
+10 m raster tensors are stored separately in:
+
+```text
+processed_data/timestamp_stage1/m2_5_static_rasters
+```
+
 ## ID behavior
 
 `watershed_id`:

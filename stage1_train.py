@@ -43,6 +43,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--netcdf-chunk-cache-mb", type=int, default=256)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
+    parser.add_argument(
+        "--disable-cudnn",
+        action="store_true",
+        help="Disable cuDNN kernels; useful on older GPUs that raise CUDNN_STATUS_NOT_SUPPORTED_ARCH_MISMATCH.",
+    )
     parser.add_argument("--temporal-channels", type=int, default=96)
     parser.add_argument(
         "--temporal-layers",
@@ -294,6 +299,8 @@ def main() -> None:
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     device = resolve_device(args.device)
+    if args.disable_cudnn:
+        torch.backends.cudnn.enabled = False
 
     bundle = prepare_stage1_data(
         manifest_dir=args.manifest_dir,
@@ -343,6 +350,7 @@ def main() -> None:
         f"target={bundle.target_shape} component_semantics={bundle.component_semantics}"
     )
     print(f"[Device] {device}")
+    print(f"[cuDNN] enabled={torch.backends.cudnn.enabled}")
 
     for epoch in range(1, args.epochs + 1):
         bundle.train_sampler.set_epoch(epoch)

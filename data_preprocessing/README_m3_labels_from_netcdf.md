@@ -1,19 +1,81 @@
-# Milestone 3: 10m Label Assets from netCDF
+# Milestone 3: 10m Dynamic Labels from netCDF
 
 Scripts:
 
 - `m0_generate_netcdf_from_zip.py`
 - `m3_prepare_10m_label_assets.py`
+- `m3_build_dynamic_manifest.py`
 
 ## Goal
 
-Milestone 3 now prepares 10m-aligned label assets for spatial block-wise modeling.
-Instead of collapsing each block to one scalar label, this path preserves the full
-10m event peak depth field and a companion block-index raster.
+Milestone 3 connects dynamic Triton netCDF outputs to the block-wise Stage 1
+training dataset.
+
+For the timestamp-conditioned model, M3 does not materialize one `.npy` label
+file per timestamp.  The M0 netCDF files already contain the full dynamic fields:
+
+```text
+output_depth[t, y, x]
+output_velocity_x[t, y, x]
+output_velocity_y[t, y, x]
+```
+
+The active Stage 1 M3 path writes a lightweight dynamic manifest plus the static
+10 m grid-to-block lookup needed to crop block-local labels during training.
 
 ## Outputs
 
-Under `--output-dir`, the script writes:
+### Active timestamp Stage 1 outputs
+
+Under `processed_data/timestamp_stage1/`, the active Stage 1 layout is:
+
+```text
+m3_dynamic_manifest/
+  dynamic_manifest.parquet
+  dynamic_metadata.json
+  rejected_events.json
+
+m3_labels_10m/
+  block_index_10m.npy
+  block_index_lookup.parquet
+  labels_10m_metadata.json
+```
+
+`m3_dynamic_manifest/` answers: which event netCDF contains the dynamic labels?
+
+`dynamic_manifest.parquet` records columns such as:
+
+- `event_id`
+- `watershed_id`
+- `path_to_netcdf`
+- `n_times`
+- `rows`
+- `cols`
+- `time_start`
+- `time_end`
+- `time_step`
+- `path_to_X_event`
+- `forcing_T`
+- `forcing_F`
+
+`m3_labels_10m/` answers: which 10 m grid cells belong to which block?
+
+`block_index_10m.npy` stores `int32` indices aligned with the netCDF grid:
+
+- `-1` means no block
+- `0..N-1` map to rows in `block_index_lookup.parquet`
+
+Together, these folders let the training dataset read:
+
+```text
+(event_id, timestamp, block_id) -> depth patch + velocity-x patch + velocity-y patch
+```
+
+### Legacy peak-label outputs
+
+`m3_prepare_10m_label_assets.py` is still useful for the older peak-response
+model and for creating the shared block-index assets.  Under `--output-dir`, it
+writes:
 
 - `events_peak_10m/D###_peak_10m.npy`
 - `events_peak_10m/D###_peak_velx_10m.npy` (when `--include-velocity`)
@@ -34,11 +96,6 @@ Under `--output-dir`, the script writes:
 - `path_to_peak_velmag_10m` (optional)
 - `rows`
 - `cols`
-
-`block_index_10m.npy` stores `int32` indices aligned with each event peak grid:
-
-- `-1` means no block
-- `0..N-1` map to rows in `block_index_lookup.parquet`
 
 ## Upstream netCDF assumptions
 
@@ -85,6 +142,33 @@ Notes:
 
 ## Example full run
 
+### Active Stage 1 dynamic manifest
+
+```bash
+/lustre/orion/proj-shared/cli138/7hn/envs/triton_andes/bin/python \
+  data_preprocessing/m3_build_dynamic_manifest.py \
+  --netcdf-dir processed_data_depth_velocity/blockwise_global/milestone_00_netcdf_v3 \
+  --netcdf-pattern 'D*_ACC_future.nc' \
+  --events-csv processed_data/timestamp_stage1/m1_events/events.csv \
+  --labels-10m-dir processed_data/timestamp_stage1/m3_labels_10m \
+  --watershed-id conasauga \
+  --component-semantics velocity \
+  --skip-incomplete \
+  --output-dir processed_data/timestamp_stage1/m3_dynamic_manifest
+```
+
+The equivalent scheduler script is:
+
+```bash
+sbatch 01_stage1_build_manifest.sh
+```
+
+The current validated output contains 40 events (`D001` through `D040`), 480
+timestamps per event, forcing tensors of shape `480 x 300`, and no rejected
+events.
+
+### Legacy peak-label assets
+
 ```bash
 /lustre/orion/proj-shared/cli138/7hn/envs/triton_andes/bin/python \
   data_preprocessing/m3_prepare_10m_label_assets.py \
@@ -126,4 +210,6 @@ Use reduced subsets before long runs:
 ## Notes
 
 - The legacy low-resolution scalar `labels.parquet` generator has been removed.
-- This Milestone 3 path is the active source for 10m label assets.
+- For Stage 1 timestamp training, use `m3_build_dynamic_manifest.py` plus the
+  block-index assets under `processed_data/timestamp_stage1/m3_labels_10m`.
+- For the older peak-depth model, use `m3_prepare_10m_label_assets.py`.

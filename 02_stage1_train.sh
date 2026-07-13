@@ -23,11 +23,11 @@ TRAIN_BATCHES=${TRAIN_BATCHES:-1000}
 EVAL_BATCHES=${EVAL_BATCHES:-300}
 
 python -u stage1_train.py \
-  --manifest-dir processed_data_depth_velocity/blockwise_global/milestone_03_dynamic_manifest \
-  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
-  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
-  --labels-10m-dir processed_data/blockwise_global/milestone_03_labels_10m \
-  --static-rasters-dir processed_data/blockwise_global/milestone_02_5_static_rasters_v3 \
+  --manifest-dir processed_data/timestamp_stage1/m3_dynamic_manifest \
+  --events-csv processed_data/timestamp_stage1/m1_events/events.csv \
+  --blocks-parquet processed_data/timestamp_stage1/m2_blocks/blocks.parquet \
+  --labels-10m-dir processed_data/timestamp_stage1/m3_labels_10m \
+  --static-rasters-dir processed_data/timestamp_stage1/m2_5_static_rasters \
   --output-dir "${OUTPUT_DIR}" \
   --test-events "${TEST_EVENT}" \
   --batch-size "${BATCH_SIZE}" \
@@ -36,4 +36,5 @@ python -u stage1_train.py \
   --eval-time-stride 12 \
   --epochs 50 \
   --num-workers 0 \
-  --device cuda
+  --device cuda \
+  --disable-cudnn
