@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
@@ -120,6 +121,7 @@ class Stage1TimestampDataset(Dataset):
         target_shape: Tuple[int, int],
         wet_threshold: float,
         netcdf_chunk_cache_mb: int = 256,
+        max_open_netcdf_handles: int = 8,
     ) -> None:
         self.events = events.reset_index(drop=True)
         self.event_arrays = event_arrays
@@ -135,7 +137,8 @@ class Stage1TimestampDataset(Dataset):
         self.target_rows, self.target_cols = target_shape
         self.wet_threshold = float(wet_threshold)
         self.netcdf_chunk_cache_bytes = int(netcdf_chunk_cache_mb * 1024 * 1024)
-        self._handles: Dict[str, nc4.Dataset] = {}
+        self.max_open_netcdf_handles = max(1, int(max_open_netcdf_handles))
+        self._handles: OrderedDict[str, nc4.Dataset] = OrderedDict()
         self._static_features = None
         self._static_masks = None
 
@@ -144,7 +147,7 @@ class Stage1TimestampDataset(Dataset):
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        state["_handles"] = {}
+        state["_handles"] = OrderedDict()
         state["_static_features"] = None
         state["_static_masks"] = None
         return state
@@ -155,18 +158,23 @@ class Stage1TimestampDataset(Dataset):
             self._static_masks = np.load(self.static_masks_path, mmap_mode="r")
 
     def _handle(self, path: str) -> nc4.Dataset:
-        if path not in self._handles:
-            ds = nc4.Dataset(path, "r")
-            for name in (
-                self.variable_names["depth"],
-                self.variable_names["component_x"],
-                self.variable_names["component_y"],
-            ):
-                variable = ds.variables[name]
-                nelems = max(1, self.netcdf_chunk_cache_bytes // max(1, variable.dtype.itemsize))
-                variable.set_var_chunk_cache(self.netcdf_chunk_cache_bytes, nelems, 0.75)
-            self._handles[path] = ds
-        return self._handles[path]
+        if path in self._handles:
+            self._handles.move_to_end(path)
+            return self._handles[path]
+        while len(self._handles) >= self.max_open_netcdf_handles:
+            _, old_ds = self._handles.popitem(last=False)
+            old_ds.close()
+        ds = nc4.Dataset(path, "r")
+        for name in (
+            self.variable_names["depth"],
+            self.variable_names["component_x"],
+            self.variable_names["component_y"],
+        ):
+            variable = ds.variables[name]
+            nelems = max(1, self.netcdf_chunk_cache_bytes // max(1, variable.dtype.itemsize))
+            variable.set_var_chunk_cache(self.netcdf_chunk_cache_bytes, nelems, 0.75)
+        self._handles[path] = ds
+        return ds
 
     @staticmethod
     def _values(array) -> np.ndarray:
@@ -333,6 +341,285 @@ class SpatiotemporalBatchSampler(Sampler[List[SampleKey]]):
             ]
 
 
+class LabelAwareBatchSampler(Sampler[List[SampleKey]]):
+    """Sample batches around labeled anchors with category and phase quotas."""
+
+    def __init__(
+        self,
+        candidates: pd.DataFrame,
+        event_ids: Sequence[str],
+        n_times: Sequence[int],
+        n_blocks: int,
+        batch_size: int,
+        batches_per_epoch: int,
+        seed: int,
+        category_fractions: Dict[str, float],
+        phase_fractions: Dict[str, float],
+    ) -> None:
+        required = {"event_id", "time_index", "anchor_block", "category", "phase"}
+        missing = required - set(candidates.columns)
+        if missing:
+            raise ValueError(f"Sampling index is missing columns: {sorted(missing)}")
+        self.event_ids = [str(value) for value in event_ids]
+        event_positions = {event_id: i for i, event_id in enumerate(self.event_ids)}
+        frame = candidates.loc[candidates["event_id"].isin(event_positions)].copy()
+        frame["event_position"] = frame["event_id"].map(event_positions).astype(np.int32)
+        valid = (
+            (frame["anchor_block"] >= 0)
+            & (frame["anchor_block"] < int(n_blocks))
+            & (frame["time_index"] >= 0)
+        )
+        for event_position, n_event_times in enumerate(n_times):
+            invalid_time = (frame["event_position"] == event_position) & (
+                frame["time_index"] >= int(n_event_times)
+            )
+            valid &= ~invalid_time
+        frame = frame.loc[valid].reset_index(drop=True)
+        if frame.empty:
+            raise ValueError("Sampling index has no candidates for the training events")
+
+        self.n_blocks = int(n_blocks)
+        self.batch_size = int(batch_size)
+        self.batches_per_epoch = int(batches_per_epoch)
+        self.seed = int(seed)
+        self.epoch = 0
+        self.category_fractions = self._validate_fractions(
+            category_fractions, "category"
+        )
+        self.phase_fractions = self._validate_fractions(phase_fractions, "phase")
+        self.pools: Dict[Tuple[str, str, int], np.ndarray] = {}
+        for key, group in frame.groupby(
+            ["category", "phase", "event_position"], observed=True, sort=False
+        ):
+            self.pools[(str(key[0]), str(key[1]), int(key[2]))] = group[
+                ["time_index", "anchor_block"]
+            ].to_numpy(dtype=np.int32)
+        self.available_categories = sorted({key[0] for key in self.pools})
+
+    @staticmethod
+    def _validate_fractions(values: Dict[str, float], name: str) -> Dict[str, float]:
+        if any(float(value) < 0 for value in values.values()):
+            raise ValueError(f"{name.title()} fractions cannot be negative")
+        result = {str(key): float(value) for key, value in values.items() if value > 0}
+        if not result:
+            raise ValueError(f"At least one positive {name} fraction is required")
+        total = sum(result.values())
+        return {key: value / total for key, value in result.items()}
+
+    @staticmethod
+    def _choice(rng, names: Sequence[str], fractions: Dict[str, float]) -> str:
+        weights = np.asarray([fractions.get(name, 0.0) for name in names], dtype=np.float64)
+        if weights.sum() <= 0:
+            weights = np.ones(len(names), dtype=np.float64)
+        weights /= weights.sum()
+        return str(rng.choice(names, p=weights))
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __len__(self) -> int:
+        return self.batches_per_epoch
+
+    def __iter__(self) -> Iterator[List[SampleKey]]:
+        rng = np.random.default_rng(self.seed + 1000003 * self.epoch)
+        for _ in range(self.batches_per_epoch):
+            category = self._choice(
+                rng, self.available_categories, self.category_fractions
+            )
+            phases = sorted({key[1] for key in self.pools if key[0] == category})
+            phase = self._choice(rng, phases, self.phase_fractions)
+            event_positions = sorted(
+                key[2]
+                for key in self.pools
+                if key[0] == category and key[1] == phase
+            )
+            event_position = int(rng.choice(event_positions))
+            pool = self.pools[(category, phase, event_position)]
+            time_index, anchor_block = pool[int(rng.integers(0, len(pool)))]
+            start = min(
+                max(0, int(anchor_block) - self.batch_size // 2),
+                max(0, self.n_blocks - self.batch_size),
+            )
+            yield [
+                (event_position, int(time_index), block_position)
+                for block_position in range(start, min(start + self.batch_size, self.n_blocks))
+            ]
+
+
+class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
+    """Build unique, same-event/time batches from individually labeled blocks."""
+
+    def __init__(
+        self,
+        candidates: pd.DataFrame,
+        event_ids: Sequence[str],
+        n_times: Sequence[int],
+        n_blocks: int,
+        batch_size: int,
+        batches_per_epoch: int,
+        seed: int,
+        category_fractions: Dict[str, float],
+        phase_fractions: Dict[str, float],
+        target_wet_cell_fraction: float,
+    ) -> None:
+        required = {
+            "event_id",
+            "time_index",
+            "anchor_block",
+            "category",
+            "phase",
+            "wet_fraction",
+        }
+        missing = required - set(candidates.columns)
+        if missing:
+            raise ValueError(f"Sampling index is missing columns: {sorted(missing)}")
+        if not 0 <= target_wet_cell_fraction <= 1:
+            raise ValueError("target_wet_cell_fraction must be between 0 and 1")
+        self.event_ids = [str(value) for value in event_ids]
+        event_positions = {event_id: i for i, event_id in enumerate(self.event_ids)}
+        frame = candidates.loc[candidates["event_id"].isin(event_positions)].copy()
+        frame["event_position"] = frame["event_id"].map(event_positions).astype(np.int32)
+        frame = frame.drop_duplicates(["event_position", "time_index", "anchor_block"])
+        valid = (
+            (frame["anchor_block"] >= 0)
+            & (frame["anchor_block"] < int(n_blocks))
+            & (frame["time_index"] >= 0)
+        )
+        for event_position, n_event_times in enumerate(n_times):
+            valid &= ~(
+                (frame["event_position"] == event_position)
+                & (frame["time_index"] >= int(n_event_times))
+            )
+        frame = frame.loc[valid].reset_index(drop=True)
+        if frame.empty:
+            raise ValueError("Sampling index has no candidates for the training events")
+
+        self.batch_size = int(batch_size)
+        self.batches_per_epoch = int(batches_per_epoch)
+        self.seed = int(seed)
+        self.epoch = 0
+        self.target_wet_cell_fraction = float(target_wet_cell_fraction)
+        self.category_fractions = LabelAwareBatchSampler._validate_fractions(
+            category_fractions, "category"
+        )
+        self.phase_fractions = LabelAwareBatchSampler._validate_fractions(
+            phase_fractions, "phase"
+        )
+        self.category_counts = self._quota_counts(
+            self.category_fractions, self.batch_size
+        )
+        self.groups: Dict[Tuple[int, int], Dict[str, object]] = {}
+        self.pools: Dict[str, Dict[int, List[Tuple[int, int]]]] = {}
+        for (event_position, time_index), group in frame.groupby(
+            ["event_position", "time_index"], observed=True, sort=False
+        ):
+            if len(group) < self.batch_size:
+                continue
+            wet_fractions = group["wet_fraction"].to_numpy(dtype=np.float32)
+            maximum_possible = np.partition(wet_fractions, -self.batch_size)[
+                -self.batch_size:
+            ].mean()
+            if maximum_possible + 1e-8 < self.target_wet_cell_fraction:
+                continue
+            phases = group["phase"].astype(str).mode()
+            phase = str(phases.iloc[0])
+            key = (int(event_position), int(time_index))
+            self.groups[key] = {
+                "blocks": group["anchor_block"].to_numpy(dtype=np.int32),
+                "categories": group["category"].astype(str).to_numpy(),
+                "wet_fractions": wet_fractions,
+                "phase": phase,
+            }
+            self.pools.setdefault(phase, {}).setdefault(int(event_position), []).append(key)
+        if not self.groups:
+            raise ValueError(
+                "Sampling index has no event/time groups capable of meeting the requested "
+                "batch size and wet-cell target; rebuild M4 with more candidates per event"
+            )
+        self.available_phases = sorted(self.pools)
+
+    @staticmethod
+    def _quota_counts(fractions: Dict[str, float], batch_size: int) -> Dict[str, int]:
+        names = list(fractions)
+        raw = np.asarray([fractions[name] * batch_size for name in names])
+        counts = np.floor(raw).astype(int)
+        remainder = batch_size - int(counts.sum())
+        order = np.argsort(-(raw - counts))
+        for index in order[:remainder]:
+            counts[index] += 1
+        return {name: int(value) for name, value in zip(names, counts)}
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = int(epoch)
+
+    def __len__(self) -> int:
+        return self.batches_per_epoch
+
+    def _select_group(self, rng):
+        phase = LabelAwareBatchSampler._choice(
+            rng, self.available_phases, self.phase_fractions
+        )
+        event_positions = sorted(self.pools[phase])
+        event_position = int(rng.choice(event_positions))
+        keys = self.pools[phase][event_position]
+        return keys[int(rng.integers(0, len(keys)))]
+
+    def _select_blocks(self, rng, group: Dict[str, object]) -> np.ndarray:
+        blocks = group["blocks"]
+        categories = group["categories"]
+        wet_fractions = group["wet_fractions"]
+        selected: List[int] = []
+        selected_set = set()
+        for category, requested in self.category_counts.items():
+            available = np.flatnonzero(categories == category)
+            if len(available) == 0 or requested == 0:
+                continue
+            count = min(requested, len(available))
+            chosen = rng.choice(available, size=count, replace=False).tolist()
+            selected.extend(int(value) for value in chosen)
+            selected_set.update(int(value) for value in chosen)
+        if len(selected) < self.batch_size:
+            available = np.asarray(
+                [index for index in range(len(blocks)) if index not in selected_set],
+                dtype=np.int64,
+            )
+            # Prefer informative cells when a requested category is unavailable.
+            jitter = rng.random(len(available)) * 1e-6
+            order = available[np.argsort(-(wet_fractions[available] + jitter))]
+            needed = self.batch_size - len(selected)
+            selected.extend(int(value) for value in order[:needed])
+
+        selected = selected[: self.batch_size]
+        selected_set = set(selected)
+        current = float(wet_fractions[selected].mean())
+        if current + 1e-8 < self.target_wet_cell_fraction:
+            unselected = [index for index in range(len(blocks)) if index not in selected_set]
+            high = sorted(unselected, key=lambda index: wet_fractions[index], reverse=True)
+            low = sorted(selected, key=lambda index: wet_fractions[index])
+            for low_index, high_index in zip(low, high):
+                if wet_fractions[high_index] <= wet_fractions[low_index]:
+                    break
+                position = selected.index(low_index)
+                selected[position] = high_index
+                current += float(
+                    (wet_fractions[high_index] - wet_fractions[low_index])
+                    / self.batch_size
+                )
+                if current + 1e-8 >= self.target_wet_cell_fraction:
+                    break
+        return np.sort(blocks[np.asarray(selected, dtype=np.int64)])
+
+    def __iter__(self) -> Iterator[List[SampleKey]]:
+        rng = np.random.default_rng(self.seed + 1000003 * self.epoch)
+        for _ in range(self.batches_per_epoch):
+            event_position, time_index = self._select_group(rng)
+            blocks = self._select_blocks(rng, self.groups[(event_position, time_index)])
+            yield [
+                (int(event_position), int(time_index), int(block_position))
+                for block_position in blocks
+            ]
+
+
 def prepare_stage1_data(
     manifest_dir: Path,
     events_csv: Path,
@@ -351,6 +638,12 @@ def prepare_stage1_data(
     wet_threshold: float,
     feature_columns: Optional[Sequence[str]] = None,
     netcdf_chunk_cache_mb: int = 256,
+    max_open_netcdf_handles: int = 8,
+    sampling_index_dir: Optional[Path] = None,
+    sampling_category_fractions: Optional[Dict[str, float]] = None,
+    sampling_phase_fractions: Optional[Dict[str, float]] = None,
+    sampling_mode: str = "anchor",
+    sampling_target_wet_cell_fraction: float = 0.0,
 ) -> Stage1DataBundle:
     manifest_dir = manifest_dir.resolve()
     manifest = pd.read_parquet(manifest_dir / "dynamic_manifest.parquet")
@@ -510,6 +803,7 @@ def prepare_stage1_data(
             target_shape=target_shape,
             wet_threshold=wet_threshold,
             netcdf_chunk_cache_mb=netcdf_chunk_cache_mb,
+            max_open_netcdf_handles=max_open_netcdf_handles,
         )
         samplers[name] = SpatiotemporalBatchSampler(
             n_events=len(frame),
@@ -527,6 +821,40 @@ def prepare_stage1_data(
             ),
             block_start_weights=block_start_weights if name == "train" else None,
         )
+
+    if sampling_index_dir is not None:
+        sampling_index_dir = sampling_index_dir.resolve()
+        candidates = pd.read_parquet(sampling_index_dir / "sampling_candidates.parquet")
+        sampling_metadata = json.loads(
+            (sampling_index_dir / "sampling_metadata.json").read_text()
+        )
+        if not np.isclose(float(sampling_metadata["wet_threshold"]), wet_threshold):
+            raise ValueError(
+                "Sampling-index wet threshold does not match training wet threshold: "
+                f"{sampling_metadata['wet_threshold']} != {wet_threshold}"
+            )
+        sampler_kwargs = {
+            "candidates": candidates,
+            "event_ids": split_frames["train"]["event_id"].tolist(),
+            "n_times": split_frames["train"]["n_times"].tolist(),
+            "n_blocks": len(block_rows),
+            "batch_size": batch_size,
+            "batches_per_epoch": train_batches_per_epoch,
+            "seed": seed,
+            "category_fractions": sampling_category_fractions
+            or {"dry": 0.15, "boundary": 0.25, "wet": 0.40, "deep": 0.20},
+            "phase_fractions": sampling_phase_fractions
+            or {"quiet": 0.15, "rising": 0.30, "peak": 0.30, "recession": 0.25},
+        }
+        if sampling_mode == "anchor":
+            samplers["train"] = LabelAwareBatchSampler(**sampler_kwargs)
+        elif sampling_mode == "balanced_batch":
+            samplers["train"] = BalancedLabelBatchSampler(
+                **sampler_kwargs,
+                target_wet_cell_fraction=sampling_target_wet_cell_fraction,
+            )
+        else:
+            raise ValueError(f"Unsupported sampling mode: {sampling_mode}")
 
     sample_event_shape = next(iter(normalized_events.values())).shape
     return Stage1DataBundle(

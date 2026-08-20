@@ -25,6 +25,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--blocks-parquet", type=Path, required=True)
     parser.add_argument("--labels-10m-dir", type=Path, required=True)
     parser.add_argument("--static-rasters-dir", type=Path, required=True)
+    parser.add_argument(
+        "--sampling-index-dir",
+        type=Path,
+        default=None,
+        help="Optional label-aware M4 candidate index used for stratified training",
+    )
+    parser.add_argument(
+        "--sampling-mode",
+        choices=["anchor", "balanced_batch"],
+        default="anchor",
+    )
+    parser.add_argument("--sampling-target-wet-cell-fraction", type=float, default=0.0)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--base-dir", type=Path, default=Path("."))
     parser.add_argument("--test-events", nargs="+", default=None)
@@ -42,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--early-stop-patience", type=int, default=8)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--netcdf-chunk-cache-mb", type=int, default=256)
+    parser.add_argument("--max-open-netcdf-handles", type=int, default=8)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument(
         "--disable-cudnn",
@@ -61,12 +74,48 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--wet-threshold", type=float, default=0.05)
     parser.add_argument("--depth-huber-delta", type=float, default=0.25)
+    parser.add_argument(
+        "--depth-loss-mode",
+        choices=["huber", "hybrid_log_weighted"],
+        default="huber",
+    )
+    parser.add_argument("--depth-log-huber-delta", type=float, default=0.20)
+    parser.add_argument("--depth-physical-huber-delta", type=float, default=1.0)
+    parser.add_argument("--depth-log-loss-weight", type=float, default=1.0)
+    parser.add_argument("--depth-physical-loss-weight", type=float, default=0.5)
+    parser.add_argument("--depth-weight-shallow", type=float, default=1.0)
+    parser.add_argument("--depth-weight-moderate", type=float, default=2.0)
+    parser.add_argument("--depth-weight-deep", type=float, default=3.0)
+    parser.add_argument("--depth-weight-extreme", type=float, default=4.0)
+    parser.add_argument("--depth-moderate-threshold", type=float, default=0.25)
+    parser.add_argument("--depth-deep-threshold", type=float, default=1.0)
+    parser.add_argument("--depth-extreme-threshold", type=float, default=2.0)
     parser.add_argument("--dry-depth-loss-weight", type=float, default=0.05)
     parser.add_argument("--component-huber-delta", type=float, default=0.25)
     parser.add_argument("--wet-loss-weight", type=float, default=0.2)
+    parser.add_argument("--wet-dice-loss-weight", type=float, default=0.0)
+    parser.add_argument("--wet-dice-smoothing", type=float, default=1.0)
     parser.add_argument("--component-loss-weight", type=float, default=0.5)
     parser.add_argument("--dry-component-loss-weight", type=float, default=0.05)
     parser.add_argument("--wet-pos-weight", type=float, default=3.0)
+    parser.add_argument("--sample-dry-fraction", type=float, default=0.15)
+    parser.add_argument("--sample-boundary-fraction", type=float, default=0.25)
+    parser.add_argument("--sample-wet-fraction", type=float, default=0.40)
+    parser.add_argument("--sample-deep-fraction", type=float, default=0.20)
+    parser.add_argument("--sample-quiet-fraction", type=float, default=0.15)
+    parser.add_argument("--sample-rising-fraction", type=float, default=0.30)
+    parser.add_argument("--sample-peak-fraction", type=float, default=0.30)
+    parser.add_argument("--sample-recession-fraction", type=float, default=0.25)
+    parser.add_argument("--diagnostic-deep-threshold", type=float, default=1.0)
+    parser.add_argument(
+        "--checkpoint-metric",
+        choices=["loss", "physical_score"],
+        default="physical_score",
+        help="Metric minimized for checkpoint selection and early stopping",
+    )
+    parser.add_argument("--selection-depth-weight", type=float, default=1.0)
+    parser.add_argument("--selection-component-weight", type=float, default=2.0)
+    parser.add_argument("--selection-inundation-weight", type=float, default=0.5)
     return parser.parse_args()
 
 
@@ -76,6 +125,32 @@ def seed_everything(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def validate_args(args) -> None:
+    if not (
+        0 <= args.depth_moderate_threshold
+        <= args.depth_deep_threshold
+        <= args.depth_extreme_threshold
+    ):
+        raise ValueError("Depth thresholds must be nonnegative and increasing")
+    weight_names = (
+        "depth_log_loss_weight",
+        "depth_physical_loss_weight",
+        "depth_weight_shallow",
+        "depth_weight_moderate",
+        "depth_weight_deep",
+        "depth_weight_extreme",
+        "wet_dice_loss_weight",
+    )
+    if any(getattr(args, name) < 0 for name in weight_names):
+        raise ValueError("Loss and depth-bin weights cannot be negative")
+    if not 0 <= args.sampling_target_wet_cell_fraction <= 1:
+        raise ValueError("Sampling target wet-cell fraction must be between 0 and 1")
+    if args.sampling_mode == "balanced_batch" and args.sampling_index_dir is None:
+        raise ValueError("balanced_batch sampling requires --sampling-index-dir")
+    if args.netcdf_chunk_cache_mb < 1 or args.max_open_netcdf_handles < 1:
+        raise ValueError("NetCDF cache size and maximum open handles must be positive")
 
 
 def resolve_device(value: str) -> torch.device:
@@ -91,6 +166,33 @@ def resolve_device(value: str) -> torch.device:
 def masked_huber(pred, target, weights, delta: float):
     loss = F.huber_loss(pred, target, reduction="none", delta=delta)
     return (loss * weights).sum() / weights.sum().clamp_min(1.0)
+
+
+def depth_bin_weights(target, args):
+    weights = torch.full_like(target, args.depth_weight_shallow)
+    weights = torch.where(
+        target >= args.depth_moderate_threshold,
+        torch.as_tensor(args.depth_weight_moderate, device=target.device),
+        weights,
+    )
+    weights = torch.where(
+        target >= args.depth_deep_threshold,
+        torch.as_tensor(args.depth_weight_deep, device=target.device),
+        weights,
+    )
+    return torch.where(
+        target >= args.depth_extreme_threshold,
+        torch.as_tensor(args.depth_weight_extreme, device=target.device),
+        weights,
+    )
+
+
+def soft_dice_loss(logits, target, mask, smoothing: float):
+    probability = torch.sigmoid(logits) * mask
+    target = target * mask
+    intersection = (probability * target).sum()
+    denominator = probability.sum() + target.sum()
+    return 1.0 - (2.0 * intersection + smoothing) / (denominator + smoothing)
 
 
 class MetricAccumulator:
@@ -109,9 +211,25 @@ class MetricAccumulator:
             "fp": 0.0,
             "fn": 0.0,
             "wet_cells": 0.0,
+            "valid_cells": 0.0,
+            "patches": 0.0,
+            "dry_patches": 0.0,
+            "boundary_patches": 0.0,
+            "partial_wet_patches": 0.0,
+            "mostly_wet_patches": 0.0,
+            "deep_patches": 0.0,
         }
 
-    def update(self, depth, wet_prob, cx, cy, batch, wet_threshold: float):
+    def update(
+        self,
+        depth,
+        wet_prob,
+        cx,
+        cy,
+        batch,
+        wet_threshold: float,
+        deep_threshold: float,
+    ):
         mask = batch["mask"] > 0.5
         true_wet = (batch["depth"] >= wet_threshold) & mask
         pred_wet = (wet_prob >= 0.5) & mask
@@ -135,6 +253,21 @@ class MetricAccumulator:
         v["fp"] += (pred_wet & ~true_wet & mask).sum().item()
         v["fn"] += (~pred_wet & true_wet).sum().item()
         v["wet_cells"] += true_wet.sum().item()
+        v["valid_cells"] += mask.sum().item()
+        valid_per_patch = mask.sum(dim=(1, 2)).clamp_min(1)
+        wet_per_patch = true_wet.sum(dim=(1, 2))
+        wet_fraction = wet_per_patch / valid_per_patch
+        patch_max_depth = batch["depth"].masked_fill(~mask, 0.0).amax(dim=(1, 2))
+        v["patches"] += depth.shape[0]
+        v["dry_patches"] += (wet_per_patch == 0).sum().item()
+        v["boundary_patches"] += (
+            (wet_fraction > 0) & (wet_fraction < 0.10)
+        ).sum().item()
+        v["partial_wet_patches"] += (
+            (wet_fraction >= 0.10) & (wet_fraction < 0.50)
+        ).sum().item()
+        v["mostly_wet_patches"] += (wet_fraction >= 0.50).sum().item()
+        v["deep_patches"] += (patch_max_depth >= deep_threshold).sum().item()
 
     def finalize(self) -> Dict[str, float]:
         v = self.values
@@ -150,6 +283,17 @@ class MetricAccumulator:
         result["wet_f1"] = 2 * precision * recall / max(precision + recall, 1e-12)
         result["wet_csi"] = v["tp"] / max(v["tp"] + v["fp"] + v["fn"], 1.0)
         result["wet_cells"] = v["wet_cells"]
+        result["wet_cell_fraction"] = v["wet_cells"] / max(v["valid_cells"], 1.0)
+        for key in (
+            "dry_patches",
+            "boundary_patches",
+            "partial_wet_patches",
+            "mostly_wet_patches",
+            "deep_patches",
+        ):
+            result[key.replace("_patches", "_patch_fraction")] = v[key] / max(
+                v["patches"], 1.0
+            )
         return result
 
 
@@ -180,6 +324,16 @@ def run_epoch(
     model.train(training)
     total_loss = 0.0
     total_samples = 0
+    loss_totals = {
+        "depth": 0.0,
+        "depth_log": 0.0,
+        "depth_physical": 0.0,
+        "dry_depth": 0.0,
+        "wet_bce": 0.0,
+        "wet_dice": 0.0,
+        "component": 0.0,
+        "dry_component": 0.0,
+    }
     metrics = MetricAccumulator()
     for batch in loader:
         batch = move_batch(batch, device)
@@ -197,9 +351,30 @@ def run_epoch(
             )
             mask = batch["mask"]
             wet = (batch["depth"] >= args.wet_threshold).float() * mask
-            depth_loss = masked_huber(
-                depth, batch["depth"], wet, args.depth_huber_delta
-            )
+            if args.depth_loss_mode == "hybrid_log_weighted":
+                weighted_wet = wet * depth_bin_weights(batch["depth"], args)
+                depth_log_loss = masked_huber(
+                    torch.log1p(depth),
+                    torch.log1p(batch["depth"]),
+                    weighted_wet,
+                    args.depth_log_huber_delta,
+                )
+                depth_physical_loss = masked_huber(
+                    depth,
+                    batch["depth"],
+                    weighted_wet,
+                    args.depth_physical_huber_delta,
+                )
+                depth_loss = (
+                    args.depth_log_loss_weight * depth_log_loss
+                    + args.depth_physical_loss_weight * depth_physical_loss
+                )
+            else:
+                depth_physical_loss = masked_huber(
+                    depth, batch["depth"], wet, args.depth_huber_delta
+                )
+                depth_log_loss = torch.zeros((), device=device)
+                depth_loss = depth_physical_loss
             dry = mask * (1.0 - wet)
             dry_depth_loss = (depth.square() * dry).sum() / dry.sum().clamp_min(1.0)
             wet_bce = F.binary_cross_entropy_with_logits(
@@ -209,6 +384,9 @@ def run_epoch(
                 pos_weight=torch.tensor(args.wet_pos_weight, device=device),
             )
             wet_loss = (wet_bce * mask).sum() / mask.sum().clamp_min(1.0)
+            wet_dice_loss = soft_dice_loss(
+                wet_logits, wet, mask, args.wet_dice_smoothing
+            )
             component_weights = wet
             component_loss = 0.5 * (
                 masked_huber(
@@ -231,6 +409,7 @@ def run_epoch(
                 depth_loss
                 + args.dry_depth_loss_weight * dry_depth_loss
                 + args.wet_loss_weight * wet_loss
+                + args.wet_dice_loss_weight * wet_dice_loss
                 + args.component_loss_weight * component_loss
                 + args.dry_component_loss_weight * dry_component_loss
             )
@@ -241,6 +420,17 @@ def run_epoch(
         batch_size = batch["event"].shape[0]
         total_loss += loss.item() * batch_size
         total_samples += batch_size
+        for key, value in {
+            "depth": depth_loss,
+            "depth_log": depth_log_loss,
+            "depth_physical": depth_physical_loss,
+            "dry_depth": dry_depth_loss,
+            "wet_bce": wet_loss,
+            "wet_dice": wet_dice_loss,
+            "component": component_loss,
+            "dry_component": dry_component_loss,
+        }.items():
+            loss_totals[key] += float(value.detach()) * batch_size
         metrics.update(
             depth.detach(),
             torch.sigmoid(wet_logits.detach()),
@@ -248,10 +438,27 @@ def run_epoch(
             cy.detach(),
             batch,
             args.wet_threshold,
+            args.diagnostic_deep_threshold,
         )
     result = metrics.finalize()
     result["loss"] = total_loss / max(total_samples, 1)
+    for key, value in loss_totals.items():
+        result[f"loss_{key}"] = value / max(total_samples, 1)
     return result
+
+
+def physical_selection_score(metrics: Dict[str, float], args) -> float:
+    return (
+        args.selection_depth_weight * metrics["depth_wet_rmse"]
+        + args.selection_component_weight * metrics["component_rmse"]
+        + args.selection_inundation_weight * (1.0 - metrics["wet_f1"])
+    )
+
+
+def checkpoint_score(metrics: Dict[str, float], args) -> float:
+    if args.checkpoint_metric == "loss":
+        return float(metrics["loss"])
+    return physical_selection_score(metrics, args)
 
 
 def make_loader(dataset, sampler, workers: int, device: torch.device):
@@ -295,6 +502,7 @@ def save_bundle_metadata(bundle: Stage1DataBundle, args, output_dir: Path) -> No
 
 def main() -> None:
     args = parse_args()
+    validate_args(args)
     seed_everything(args.seed)
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -320,6 +528,22 @@ def main() -> None:
         wet_threshold=args.wet_threshold,
         feature_columns=args.block_feature_columns,
         netcdf_chunk_cache_mb=args.netcdf_chunk_cache_mb,
+        max_open_netcdf_handles=args.max_open_netcdf_handles,
+        sampling_index_dir=args.sampling_index_dir,
+        sampling_category_fractions={
+            "dry": args.sample_dry_fraction,
+            "boundary": args.sample_boundary_fraction,
+            "wet": args.sample_wet_fraction,
+            "deep": args.sample_deep_fraction,
+        },
+        sampling_phase_fractions={
+            "quiet": args.sample_quiet_fraction,
+            "rising": args.sample_rising_fraction,
+            "peak": args.sample_peak_fraction,
+            "recession": args.sample_recession_fraction,
+        },
+        sampling_mode=args.sampling_mode,
+        sampling_target_wet_cell_fraction=args.sampling_target_wet_cell_fraction,
     )
     save_bundle_metadata(bundle, args, output_dir)
     train_loader = make_loader(bundle.train_dataset, bundle.train_sampler, args.num_workers, device)
@@ -342,6 +566,8 @@ def main() -> None:
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
     best_val_loss = float("inf")
+    best_physical_score = float("inf")
+    best_selection_score = float("inf")
     patience = 0
     history = []
     checkpoint_path = output_dir / "best_model.pt"
@@ -356,20 +582,58 @@ def main() -> None:
         bundle.train_sampler.set_epoch(epoch)
         train_metrics = run_epoch(model, train_loader, device, args, optimizer)
         val_metrics = run_epoch(model, val_loader, device, args, None)
+        val_metrics["physical_score"] = physical_selection_score(val_metrics, args)
+        selection_score = checkpoint_score(val_metrics, args)
         history.append({"epoch": epoch, "train": train_metrics, "val": val_metrics})
         print(
             f"epoch={epoch:03d} train_loss={train_metrics['loss']:.6f} "
             f"val_loss={val_metrics['loss']:.6f} val_depth_wet_rmse={val_metrics['depth_wet_rmse']:.4f} "
-            f"val_component_rmse={val_metrics['component_rmse']:.4f} val_f1={val_metrics['wet_f1']:.4f}"
+            f"val_component_rmse={val_metrics['component_rmse']:.4f} val_f1={val_metrics['wet_f1']:.4f} "
+            f"physical_score={val_metrics['physical_score']:.4f} "
+            f"train_dry_patch_fraction={train_metrics['dry_patch_fraction']:.3f} "
+            f"train_wet_cell_fraction={train_metrics['wet_cell_fraction']:.3f}"
+        )
+        print(
+            f"[Loss] epoch={epoch:03d} train_depth={train_metrics['loss_depth']:.6f} "
+            f"train_depth_log={train_metrics['loss_depth_log']:.6f} "
+            f"train_depth_physical={train_metrics['loss_depth_physical']:.6f} "
+            f"train_wet_bce={train_metrics['loss_wet_bce']:.6f} "
+            f"train_wet_dice={train_metrics['loss_wet_dice']:.6f} "
+            f"train_component={train_metrics['loss_component']:.6f}"
         )
         if val_metrics["loss"] < best_val_loss:
             best_val_loss = val_metrics["loss"]
-            patience = 0
             torch.save(
                 {
                     "model_state_dict": model.state_dict(),
                     "model_config": model_config,
                     "best_val_loss": best_val_loss,
+                    "component_semantics": bundle.component_semantics,
+                    "variable_names": bundle.variable_names,
+                },
+                output_dir / "best_val_loss_model.pt",
+            )
+        if val_metrics["physical_score"] < best_physical_score:
+            best_physical_score = val_metrics["physical_score"]
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "model_config": model_config,
+                    "best_physical_score": best_physical_score,
+                    "component_semantics": bundle.component_semantics,
+                    "variable_names": bundle.variable_names,
+                },
+                output_dir / "best_physical_model.pt",
+            )
+        if selection_score < best_selection_score:
+            best_selection_score = selection_score
+            patience = 0
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "model_config": model_config,
+                    "checkpoint_metric": args.checkpoint_metric,
+                    "best_selection_score": best_selection_score,
                     "component_semantics": bundle.component_semantics,
                     "variable_names": bundle.variable_names,
                 },
@@ -384,8 +648,12 @@ def main() -> None:
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     test_metrics = run_epoch(model, test_loader, device, args, None)
+    test_metrics["physical_score"] = physical_selection_score(test_metrics, args)
     payload = {
         "best_val_loss": best_val_loss,
+        "best_physical_score": best_physical_score,
+        "checkpoint_metric": args.checkpoint_metric,
+        "best_selection_score": best_selection_score,
         "test": test_metrics,
         "history": history,
         "component_semantics": bundle.component_semantics,

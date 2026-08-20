@@ -17,7 +17,8 @@ conda activate /lustre/orion/proj-shared/cli138/7hn/envs/triton_andes
 mkdir -p slurm_output
 
 TEST_EVENT=${TEST_EVENT:-D030}
-OUTPUT_DIR=${OUTPUT_DIR:-results/stage1_timestamp}
+OUTPUT_DIR=${OUTPUT_DIR:-results/stage1_timestamp_stratified}
+SAMPLING_INDEX_DIR=${SAMPLING_INDEX_DIR:-processed_data/timestamp_stage1/m4_sampling_index}
 BATCH_SIZE=${BATCH_SIZE:-16}
 TRAIN_BATCHES=${TRAIN_BATCHES:-1000}
 EVAL_BATCHES=${EVAL_BATCHES:-300}
@@ -28,6 +29,7 @@ python -u stage1_train.py \
   --blocks-parquet processed_data/timestamp_stage1/m2_blocks/blocks.parquet \
   --labels-10m-dir processed_data/timestamp_stage1/m3_labels_10m \
   --static-rasters-dir processed_data/timestamp_stage1/m2_5_static_rasters \
+  --sampling-index-dir "${SAMPLING_INDEX_DIR}" \
   --output-dir "${OUTPUT_DIR}" \
   --test-events "${TEST_EVENT}" \
   --batch-size "${BATCH_SIZE}" \
@@ -35,6 +37,7 @@ python -u stage1_train.py \
   --eval-batches "${EVAL_BATCHES}" \
   --eval-time-stride 12 \
   --epochs 50 \
+  --checkpoint-metric physical_score \
   --num-workers 0 \
   --device cuda \
   --disable-cudnn

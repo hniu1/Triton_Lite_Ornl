@@ -242,7 +242,9 @@ def main():
     history = payload["history"]
     if not history:
         raise ValueError("metrics.json has no epoch history")
-    selected = min(history, key=lambda row: row["val"]["loss"])
+    checkpoint_metric = payload.get("checkpoint_metric", "loss")
+    selection_key = "physical_score" if checkpoint_metric == "physical_score" else "loss"
+    selected = min(history, key=lambda row: row["val"][selection_key])
     best_epoch = int(selected["epoch"])
     best_val = selected["val"]
     test = payload["test"]

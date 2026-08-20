@@ -130,14 +130,26 @@ The older watershed-level training, tuning, and prediction scripts have been rem
 │   ├── m2_5_prepare_block_static_rasters.py
 │   ├── m3_prepare_10m_label_assets.py
 │   ├── m3_build_dynamic_manifest.py
+│   ├── m4_build_stage1_sampling_index.py
+│   ├── m4_merge_stage1_sampling_index.py
 │   ├── README_m1_events.md
 │   ├── README_m2_blocks.md
-│   └── README_m3_labels_from_netcdf.md
+│   ├── README_m3_labels_from_netcdf.md
+│   └── README_m4_sampling_index.md
 ├── stage1_data.py                            # streaming timestamp/block dataset
 ├── stage1_model.py                           # causal TCN + conditioned spatial U-Net
 ├── stage1_train.py                           # Stage 1 training and evaluation
 ├── stage1_predict.py                         # timestamp-conditioned inference
+├── stage1_sampling_diagnostics.py            # measures dry/wet sample balance
 ├── 01_stage1_build_manifest.sh               # dynamic-manifest scheduler job
+├── 01b_stage1_sampling_diagnostics.sh         # original-sampler diagnostics
+├── 02_stage1_build_sampling_index.sh          # per-event M4 array job
+├── 02b_stage1_merge_sampling_index.sh         # merges M4 event shards
+├── 02c_stage1_stratified_sampling_diagnostics.sh # measures new sampler balance
+├── 04_stage1_build_dense_sampling_index.sh    # dense per-event index array
+├── 04b_stage1_merge_dense_sampling_index.sh   # merges dense event shards
+├── 04c_stage1_dense_sampling_diagnostics.sh   # verifies whole-batch balance
+├── 05_stage1_train_max.sh                     # stronger sampling/loss run
 ├── 02_stage1_train.sh                        # Stage 1 training scheduler job
 ├── blockwise_data.py                       # shared split and normalization helpers
 ├── blockwise_matrix_data.py                # builds 80x80 block-local training samples
@@ -146,6 +158,7 @@ The older watershed-level training, tuning, and prediction scripts have been rem
 ├── tune_blockwise_matrix.py                # tunes matrix-model hyperparameters
 ├── predict_blockwise_matrix.py             # writes matrix predictions from a trained model
 ├── STAGE1_TIMESTAMP_SURROGATE.md            # dynamic Stage 1 data/model contract
+├── STAGE1_MAX_PERFORMANCE.md                 # maximum-performance experiment
 └── README.md
 ```
 

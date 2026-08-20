@@ -25,11 +25,17 @@ only after auditing the binary convention.
 ## Files
 
 - `data_preprocessing/m3_build_dynamic_manifest.py`: validates netCDF trajectories.
+- `data_preprocessing/m4_build_stage1_sampling_index.py`: measures dynamic label categories.
+- `stage1_sampling_diagnostics.py`: measures the actual distribution produced by a sampler.
 - `stage1_data.py`: event splits, normalization, streaming block/time reads.
 - `stage1_model.py`: causal TCN plus conditioned spatial U-Net.
 - `stage1_train.py`: losses, metrics, checkpointing, held-out testing.
 - `stage1_predict.py`: selected event/timestamp/block inference.
 - `01_stage1_build_manifest.sh`: manifest scheduler job.
+- `01b_stage1_sampling_diagnostics.sh`: original-sampler diagnostic job.
+- `02_stage1_build_sampling_index.sh`: per-event label-index array job.
+- `02b_stage1_merge_sampling_index.sh`: merges label-index shards.
+- `02c_stage1_stratified_sampling_diagnostics.sh`: measures full stratified batches.
 - `02_stage1_train.sh`: training scheduler job.
 
 ## Why labels are streamed
@@ -52,7 +58,7 @@ sbatch 01_stage1_build_manifest.sh
 The command writes:
 
 ```text
-processed_data_depth_velocity/blockwise_global/milestone_03_dynamic_manifest/
+processed_data/timestamp_stage1/m3_dynamic_manifest/
   dynamic_manifest.parquet
   dynamic_metadata.json
   rejected_events.json
@@ -60,6 +66,21 @@ processed_data_depth_velocity/blockwise_global/milestone_03_dynamic_manifest/
 
 `--skip-incomplete` records unreadable or incomplete events rather than hiding
 them. Repair rejected events before the final scientific training campaign.
+
+## Diagnose and build the label-aware sampler
+
+```bash
+sbatch 01b_stage1_sampling_diagnostics.sh
+sbatch 02_stage1_build_sampling_index.sh
+# Submit this only after every array task finishes successfully:
+sbatch 02b_stage1_merge_sampling_index.sh
+sbatch 02c_stage1_stratified_sampling_diagnostics.sh
+```
+
+The first command measures how often the original proxy sampler returns dry
+patches. M4 then categorizes actual TRITON anchor patches by wet fraction,
+depth, and hydrograph phase. See
+`data_preprocessing/README_m4_sampling_index.md` for details.
 
 ## Train
 
@@ -74,8 +95,10 @@ evenly distributed samples across events, timestamps, and blocks.
 Important outputs:
 
 ```text
-results/stage1_timestamp/
+results/stage1_timestamp_stratified/
   best_model.pt
+  best_val_loss_model.pt
+  best_physical_model.pt
   normalization_stats.npz
   run_config.json
   metrics.json
@@ -112,10 +135,11 @@ The training objective combines:
 3. signed-component Huber loss on truly wet cells;
 4. a dry-cell penalty that drives flow components toward zero.
 
-Training sampling is also imbalance-aware: timestamps are sampled from a
-mixture of uniform and hydrograph-intensity distributions, and spatial batches
-are sampled from a mixture of uniform and flow-accumulation-weighted block
-distributions. Validation and testing remain deterministic and unweighted.
+Training uses actual label-aware anchors with category and hydrograph-phase
+quotas. The older fallback sampler remains available when
+`--sampling-index-dir` is omitted; it uses mixtures of uniform and
+hydrograph-intensity timestamps and uniform and flow-accumulation-weighted
+blocks. Validation and testing remain deterministic and unweighted.
 
 This is a timestamp emulator, not an autoregressive simulator. Predictions at
 different timestamps do not consume earlier predicted hydraulic states.

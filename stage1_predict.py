@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--event-id", required=True)
+    parser.add_argument("--checkpoint", default="best_model.pt")
     parser.add_argument("--time-indices", type=int, nargs="+", required=True)
     parser.add_argument("--block-indices", type=int, nargs="+", required=True)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
@@ -31,6 +32,8 @@ def main():
     run_dir = args.run_dir.resolve()
     config = json.loads((run_dir / "run_config.json").read_text())
     device = resolve_device(args.device)
+    if bool(config.get("disable_cudnn", False)):
+        torch.backends.cudnn.enabled = False
     bundle = prepare_stage1_data(
         manifest_dir=Path(config["manifest_dir"]),
         events_csv=Path(config["events_csv"]),
@@ -49,6 +52,7 @@ def main():
         wet_threshold=float(config["wet_threshold"]),
         feature_columns=config["block_feature_columns"],
         netcdf_chunk_cache_mb=int(config["netcdf_chunk_cache_mb"]),
+        max_open_netcdf_handles=int(config.get("max_open_netcdf_handles", 8)),
     )
     dataset = bundle.test_dataset
     event_positions = dataset.events.index[
@@ -73,7 +77,7 @@ def main():
         for block_position in args.block_indices
     ]
     loader = DataLoader(dataset, batch_size=len(args.block_indices), sampler=keys, num_workers=args.num_workers)
-    checkpoint = torch.load(run_dir / "best_model.pt", map_location=device, weights_only=False)
+    checkpoint = torch.load(run_dir / args.checkpoint, map_location=device, weights_only=False)
     model = Stage1TimestampModel(**checkpoint["model_config"]).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
@@ -104,6 +108,9 @@ def main():
                     wet_probability=torch.sigmoid(wet_logits[local]).cpu().numpy(),
                     component_x=cx[local].cpu().numpy(),
                     component_y=cy[local].cpu().numpy(),
+                    true_depth=batch["depth"][local].cpu().numpy(),
+                    true_component_x=batch["component_x"][local].cpu().numpy(),
+                    true_component_y=batch["component_y"][local].cpu().numpy(),
                     mask=batch["mask"][local].cpu().numpy(),
                 )
                 records.append(
