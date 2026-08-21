@@ -116,6 +116,8 @@ the legacy blockwise model and is not yet integrated into Stage-1.
 - `docs/stage1/STAGE1_TIMESTAMP_SURROGATE.md`: detailed active architecture.
 - `docs/stage1/STAGE1_MAX_PERFORMANCE.md`: current completed training experiment.
 - `docs/stage1/STAGE1_V4_FINE_TUNING.md`: implemented controlled V4 ablation.
+- `docs/stage1/OPERATIONAL_SURROGATE_DIRECTION.md`: data sufficiency,
+  state-transition architecture decision, branch strategy, and fast-win plan.
 - `results/stage1_timestamp_max/D030_whole_area_interval20_gated/RESULTS_SUMMARY.md`:
   gated results and prioritized improvement plan.
 - `docs/project/`: historical status and publication/validation notes.
