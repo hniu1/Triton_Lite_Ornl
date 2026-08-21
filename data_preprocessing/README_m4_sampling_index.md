@@ -31,7 +31,7 @@ over available candidates.
 First measure the old forcing/flow-proxy sampler:
 
 ```bash
-sbatch 01b_stage1_sampling_diagnostics.sh
+sbatch workflows/stage1/01b_stage1_sampling_diagnostics.sh
 ```
 
 The result is written to:
@@ -43,19 +43,19 @@ results/stage1_timestamp/sampling_diagnostics/proxy_sampler.json
 Then build one M4 shard per event:
 
 ```bash
-sbatch 02_stage1_build_sampling_index.sh
+sbatch workflows/stage1/02_stage1_build_sampling_index.sh
 ```
 
 After all 40 array tasks finish successfully, merge the shards:
 
 ```bash
-sbatch 02b_stage1_merge_sampling_index.sh
+sbatch workflows/stage1/02b_stage1_merge_sampling_index.sh
 ```
 
 Measure the actual full-batch distribution from the new anchor sampler:
 
 ```bash
-sbatch 02c_stage1_stratified_sampling_diagnostics.sh
+sbatch workflows/stage1/02c_stage1_stratified_sampling_diagnostics.sh
 ```
 
 Compare `proxy_sampler.json` with `label_aware_sampler.json` before training.
@@ -70,7 +70,7 @@ processed_data/timestamp_stage1/m4_sampling_index/
   shards/D###/...
 ```
 
-After reviewing that comparison, `02_stage1_train.sh` reads this directory through
+After reviewing that comparison, `workflows/stage1/02_stage1_train.sh` reads this directory through
 `--sampling-index-dir` and writes a new run to
 `results/stage1_timestamp_stratified/`. The original baseline run remains
 unchanged in `results/stage1_timestamp/`.
@@ -97,11 +97,11 @@ which is the quantity to use when deciding whether the quotas need adjustment.
 
 ## Dense whole-batch extension
 
-The follow-up workflow uses `04_stage1_build_dense_sampling_index.sh` to build
+The follow-up workflow uses `workflows/stage1/04_stage1_build_dense_sampling_index.sh` to build
 50,000 candidates per event under `m4_sampling_index_dense/`. It defines deep
 water using both wet fraction and wet-cell 90th-percentile depth. The
 `balanced_batch` sampler then selects all 16 unique blocks from one event and
 timestamp and enforces a minimum mean wet-cell fraction.
 
-See `STAGE1_MAX_PERFORMANCE.md` before running the dense-index and hybrid-loss
-experiment.
+See `docs/stage1/STAGE1_MAX_PERFORMANCE.md` before running the dense-index and
+hybrid-loss experiment.

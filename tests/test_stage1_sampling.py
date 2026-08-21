@@ -76,6 +76,37 @@ class LabelAwareSamplerTest(unittest.TestCase):
             self.assertEqual({(key[0], key[1]) for key in batch}, {(0, 20)})
             self.assertGreaterEqual(sum(wet_by_block[value] for value in blocks) / 16, 0.15)
 
+    def test_strict_balanced_batches_preserve_category_quotas(self):
+        rows = []
+        category_by_block = {}
+        block = 0
+        for category, wet_fractions in {
+            "dry": [0.0] * 8,
+            "boundary": [0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09],
+            "wet": [0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55],
+            "deep": [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80],
+        }.items():
+            for wet_fraction in wet_fractions:
+                rows.append({
+                    "event_id": "D001", "time_index": 20, "anchor_block": block,
+                    "category": category, "phase": "peak", "wet_fraction": wet_fraction,
+                })
+                category_by_block[block] = category
+                block += 1
+        sampler = BalancedLabelBatchSampler(
+            candidates=pd.DataFrame(rows), event_ids=["D001"], n_times=[40], n_blocks=32,
+            batch_size=16, batches_per_epoch=5, seed=42,
+            category_fractions={"dry": 0.125, "boundary": 0.25, "wet": 0.3125, "deep": 0.3125},
+            phase_fractions={"peak": 1.0}, target_wet_cell_fraction=0.15,
+            strict_category_quotas=True,
+        )
+        expected = {"dry": 2, "boundary": 4, "wet": 5, "deep": 5}
+        for batch in sampler:
+            counts = {name: 0 for name in expected}
+            for key in batch:
+                counts[category_by_block[key[2]]] += 1
+            self.assertEqual(counts, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

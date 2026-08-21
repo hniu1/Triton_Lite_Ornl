@@ -461,6 +461,7 @@ class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
         category_fractions: Dict[str, float],
         phase_fractions: Dict[str, float],
         target_wet_cell_fraction: float,
+        strict_category_quotas: bool = False,
     ) -> None:
         required = {
             "event_id",
@@ -499,6 +500,7 @@ class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
         self.seed = int(seed)
         self.epoch = 0
         self.target_wet_cell_fraction = float(target_wet_cell_fraction)
+        self.strict_category_quotas = bool(strict_category_quotas)
         self.category_fractions = LabelAwareBatchSampler._validate_fractions(
             category_fractions, "category"
         )
@@ -516,9 +518,25 @@ class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
             if len(group) < self.batch_size:
                 continue
             wet_fractions = group["wet_fraction"].to_numpy(dtype=np.float32)
-            maximum_possible = np.partition(wet_fractions, -self.batch_size)[
-                -self.batch_size:
-            ].mean()
+            categories = group["category"].astype(str).to_numpy()
+            if self.strict_category_quotas:
+                quota_indices = []
+                feasible = True
+                for category, requested in self.category_counts.items():
+                    available = np.flatnonzero(categories == category)
+                    if len(available) < requested:
+                        feasible = False
+                        break
+                    if requested:
+                        order = available[np.argsort(-wet_fractions[available])]
+                        quota_indices.extend(order[:requested].tolist())
+                if not feasible:
+                    continue
+                maximum_possible = float(wet_fractions[quota_indices].mean())
+            else:
+                maximum_possible = np.partition(wet_fractions, -self.batch_size)[
+                    -self.batch_size:
+                ].mean()
             if maximum_possible + 1e-8 < self.target_wet_cell_fraction:
                 continue
             phases = group["phase"].astype(str).mode()
@@ -526,7 +544,7 @@ class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
             key = (int(event_position), int(time_index))
             self.groups[key] = {
                 "blocks": group["anchor_block"].to_numpy(dtype=np.int32),
-                "categories": group["category"].astype(str).to_numpy(),
+                "categories": categories,
                 "wet_fractions": wet_fractions,
                 "phase": phase,
             }
@@ -579,6 +597,8 @@ class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
             selected.extend(int(value) for value in chosen)
             selected_set.update(int(value) for value in chosen)
         if len(selected) < self.batch_size:
+            if self.strict_category_quotas:
+                raise RuntimeError("Strict category quotas became infeasible after initialization")
             available = np.asarray(
                 [index for index in range(len(blocks)) if index not in selected_set],
                 dtype=np.int64,
@@ -593,20 +613,48 @@ class BalancedLabelBatchSampler(Sampler[List[SampleKey]]):
         selected_set = set(selected)
         current = float(wet_fractions[selected].mean())
         if current + 1e-8 < self.target_wet_cell_fraction:
-            unselected = [index for index in range(len(blocks)) if index not in selected_set]
-            high = sorted(unselected, key=lambda index: wet_fractions[index], reverse=True)
-            low = sorted(selected, key=lambda index: wet_fractions[index])
-            for low_index, high_index in zip(low, high):
-                if wet_fractions[high_index] <= wet_fractions[low_index]:
-                    break
-                position = selected.index(low_index)
-                selected[position] = high_index
-                current += float(
-                    (wet_fractions[high_index] - wet_fractions[low_index])
-                    / self.batch_size
-                )
-                if current + 1e-8 >= self.target_wet_cell_fraction:
-                    break
+            if self.strict_category_quotas:
+                for category in self.category_counts:
+                    low = sorted(
+                        [index for index in selected if categories[index] == category],
+                        key=lambda index: wet_fractions[index],
+                    )
+                    high = sorted(
+                        [index for index in range(len(blocks)) if index not in selected_set and categories[index] == category],
+                        key=lambda index: wet_fractions[index], reverse=True,
+                    )
+                    for low_index, high_index in zip(low, high):
+                        if wet_fractions[high_index] <= wet_fractions[low_index]:
+                            break
+                        position = selected.index(low_index)
+                        selected[position] = high_index
+                        selected_set.remove(low_index)
+                        selected_set.add(high_index)
+                        current += float(
+                            (wet_fractions[high_index] - wet_fractions[low_index])
+                            / self.batch_size
+                        )
+                        if current + 1e-8 >= self.target_wet_cell_fraction:
+                            break
+                    if current + 1e-8 >= self.target_wet_cell_fraction:
+                        break
+            else:
+                unselected = [index for index in range(len(blocks)) if index not in selected_set]
+                high = sorted(unselected, key=lambda index: wet_fractions[index], reverse=True)
+                low = sorted(selected, key=lambda index: wet_fractions[index])
+                for low_index, high_index in zip(low, high):
+                    if wet_fractions[high_index] <= wet_fractions[low_index]:
+                        break
+                    position = selected.index(low_index)
+                    selected[position] = high_index
+                    current += float(
+                        (wet_fractions[high_index] - wet_fractions[low_index])
+                        / self.batch_size
+                    )
+                    if current + 1e-8 >= self.target_wet_cell_fraction:
+                        break
+        if current + 1e-8 < self.target_wet_cell_fraction:
+            raise RuntimeError("Sampler failed to reach its configured wet-cell target")
         return np.sort(blocks[np.asarray(selected, dtype=np.int64)])
 
     def __iter__(self) -> Iterator[List[SampleKey]]:
@@ -644,6 +692,7 @@ def prepare_stage1_data(
     sampling_phase_fractions: Optional[Dict[str, float]] = None,
     sampling_mode: str = "anchor",
     sampling_target_wet_cell_fraction: float = 0.0,
+    sampling_strict_category_quotas: bool = False,
 ) -> Stage1DataBundle:
     manifest_dir = manifest_dir.resolve()
     manifest = pd.read_parquet(manifest_dir / "dynamic_manifest.parquet")
@@ -852,6 +901,7 @@ def prepare_stage1_data(
             samplers["train"] = BalancedLabelBatchSampler(
                 **sampler_kwargs,
                 target_wet_cell_fraction=sampling_target_wet_cell_fraction,
+                strict_category_quotas=sampling_strict_category_quotas,
             )
         else:
             raise ValueError(f"Unsupported sampling mode: {sampling_mode}")

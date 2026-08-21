@@ -37,6 +37,7 @@ def parse_args() -> argparse.Namespace:
         default="anchor",
     )
     parser.add_argument("--sampling-target-wet-cell-fraction", type=float, default=0.0)
+    parser.add_argument("--sampling-strict-category-quotas", action="store_true")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--base-dir", type=Path, default=Path("."))
     parser.add_argument("--test-events", nargs="+", default=None)
@@ -91,12 +92,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--depth-deep-threshold", type=float, default=1.0)
     parser.add_argument("--depth-extreme-threshold", type=float, default=2.0)
     parser.add_argument("--dry-depth-loss-weight", type=float, default=0.05)
+    parser.add_argument(
+        "--couple-depth-with-wet-probability",
+        action="store_true",
+        help="Multiply positive depth by wet probability before depth loss and metrics",
+    )
     parser.add_argument("--component-huber-delta", type=float, default=0.25)
     parser.add_argument("--wet-loss-weight", type=float, default=0.2)
     parser.add_argument("--wet-dice-loss-weight", type=float, default=0.0)
     parser.add_argument("--wet-dice-smoothing", type=float, default=1.0)
     parser.add_argument("--component-loss-weight", type=float, default=0.5)
     parser.add_argument("--dry-component-loss-weight", type=float, default=0.05)
+    parser.add_argument(
+        "--component-loss-mode",
+        choices=["component_huber", "speed_aware"],
+        default="component_huber",
+    )
+    parser.add_argument("--speed-loss-weight", type=float, default=0.5)
+    parser.add_argument("--direction-loss-weight", type=float, default=0.1)
+    parser.add_argument("--direction-min-speed", type=float, default=0.05)
+    parser.add_argument("--velocity-weight-scale", type=float, default=2.0)
+    parser.add_argument("--velocity-weight-reference-speed", type=float, default=0.25)
+    parser.add_argument("--velocity-weight-cap", type=float, default=3.0)
     parser.add_argument("--wet-pos-weight", type=float, default=3.0)
     parser.add_argument("--sample-dry-fraction", type=float, default=0.15)
     parser.add_argument("--sample-boundary-fraction", type=float, default=0.25)
@@ -116,6 +133,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selection-depth-weight", type=float, default=1.0)
     parser.add_argument("--selection-component-weight", type=float, default=2.0)
     parser.add_argument("--selection-inundation-weight", type=float, default=0.5)
+    parser.add_argument(
+        "--initial-checkpoint",
+        type=Path,
+        default=None,
+        help="Optional compatible checkpoint used to initialize a new training run",
+    )
     return parser.parse_args()
 
 
@@ -142,6 +165,10 @@ def validate_args(args) -> None:
         "depth_weight_deep",
         "depth_weight_extreme",
         "wet_dice_loss_weight",
+        "speed_loss_weight",
+        "direction_loss_weight",
+        "velocity_weight_scale",
+        "velocity_weight_cap",
     )
     if any(getattr(args, name) < 0 for name in weight_names):
         raise ValueError("Loss and depth-bin weights cannot be negative")
@@ -151,6 +178,8 @@ def validate_args(args) -> None:
         raise ValueError("balanced_batch sampling requires --sampling-index-dir")
     if args.netcdf_chunk_cache_mb < 1 or args.max_open_netcdf_handles < 1:
         raise ValueError("NetCDF cache size and maximum open handles must be positive")
+    if args.direction_min_speed < 0 or args.velocity_weight_reference_speed <= 0:
+        raise ValueError("Velocity thresholds must be nonnegative and reference speed positive")
 
 
 def resolve_device(value: str) -> torch.device:
@@ -193,6 +222,37 @@ def soft_dice_loss(logits, target, mask, smoothing: float):
     intersection = (probability * target).sum()
     denominator = probability.sum() + target.sum()
     return 1.0 - (2.0 * intersection + smoothing) / (denominator + smoothing)
+
+
+def speed_aware_component_losses(cx, cy, target_x, target_y, wet, args):
+    true_speed = torch.hypot(target_x, target_y)
+    # sqrt(x^2 + y^2) has an undefined gradient at exactly (0, 0). The small
+    # epsilon keeps zero/near-zero velocity cells from injecting NaN gradients.
+    predicted_speed = torch.sqrt(cx.square() + cy.square() + 1e-12)
+    speed_ratio = (true_speed / args.velocity_weight_reference_speed).clamp(
+        min=0.0, max=args.velocity_weight_cap
+    )
+    weights = wet * (1.0 + args.velocity_weight_scale * speed_ratio)
+    vector_loss = 0.5 * (
+        masked_huber(cx, target_x, weights, args.component_huber_delta)
+        + masked_huber(cy, target_y, weights, args.component_huber_delta)
+    )
+    speed_loss = masked_huber(
+        predicted_speed, true_speed, weights, args.component_huber_delta
+    )
+    direction_mask = (wet > 0) & (true_speed >= args.direction_min_speed)
+    if direction_mask.any():
+        dot = cx[direction_mask] * target_x[direction_mask] + cy[direction_mask] * target_y[direction_mask]
+        cosine = dot / (predicted_speed[direction_mask] * true_speed[direction_mask]).clamp_min(1e-6)
+        direction_loss = (1.0 - cosine.clamp(-1.0, 1.0)).mean()
+    else:
+        direction_loss = (cx.sum() + cy.sum()) * 0.0
+    total = (
+        vector_loss
+        + args.speed_loss_weight * speed_loss
+        + args.direction_loss_weight * direction_loss
+    )
+    return total, vector_loss, speed_loss, direction_loss
 
 
 class MetricAccumulator:
@@ -332,6 +392,9 @@ def run_epoch(
         "wet_bce": 0.0,
         "wet_dice": 0.0,
         "component": 0.0,
+        "component_vector": 0.0,
+        "speed": 0.0,
+        "direction": 0.0,
         "dry_component": 0.0,
     }
     metrics = MetricAccumulator()
@@ -351,6 +414,8 @@ def run_epoch(
             )
             mask = batch["mask"]
             wet = (batch["depth"] >= args.wet_threshold).float() * mask
+            if args.couple_depth_with_wet_probability:
+                depth = depth * torch.sigmoid(wet_logits)
             if args.depth_loss_mode == "hybrid_log_weighted":
                 weighted_wet = wet * depth_bin_weights(batch["depth"], args)
                 depth_log_loss = masked_huber(
@@ -387,21 +452,20 @@ def run_epoch(
             wet_dice_loss = soft_dice_loss(
                 wet_logits, wet, mask, args.wet_dice_smoothing
             )
-            component_weights = wet
-            component_loss = 0.5 * (
-                masked_huber(
-                    cx,
-                    batch["component_x"],
-                    component_weights,
-                    args.component_huber_delta,
+            if args.component_loss_mode == "speed_aware":
+                component_loss, component_vector_loss, speed_loss, direction_loss = (
+                    speed_aware_component_losses(
+                        cx, cy, batch["component_x"], batch["component_y"], wet, args
+                    )
                 )
-                + masked_huber(
-                    cy,
-                    batch["component_y"],
-                    component_weights,
-                    args.component_huber_delta,
+            else:
+                component_vector_loss = 0.5 * (
+                    masked_huber(cx, batch["component_x"], wet, args.component_huber_delta)
+                    + masked_huber(cy, batch["component_y"], wet, args.component_huber_delta)
                 )
-            )
+                component_loss = component_vector_loss
+                speed_loss = torch.zeros((), device=device)
+                direction_loss = torch.zeros((), device=device)
             dry_component_loss = (
                 ((cx.square() + cy.square()) * dry).sum() / dry.sum().clamp_min(1.0)
             )
@@ -413,9 +477,26 @@ def run_epoch(
                 + args.component_loss_weight * component_loss
                 + args.dry_component_loss_weight * dry_component_loss
             )
+            named_losses = {
+                "total": loss,
+                "depth": depth_loss,
+                "dry_depth": dry_depth_loss,
+                "wet_bce": wet_loss,
+                "wet_dice": wet_dice_loss,
+                "component": component_loss,
+                "component_vector": component_vector_loss,
+                "speed": speed_loss,
+                "direction": direction_loss,
+                "dry_component": dry_component_loss,
+            }
+            nonfinite = [name for name, value in named_losses.items() if not torch.isfinite(value)]
+            if nonfinite:
+                raise FloatingPointError(f"Non-finite losses before backward: {nonfinite}")
             if training:
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                gradient_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                if not torch.isfinite(gradient_norm):
+                    raise FloatingPointError("Non-finite gradient norm before optimizer step")
                 optimizer.step()
         batch_size = batch["event"].shape[0]
         total_loss += loss.item() * batch_size
@@ -428,6 +509,9 @@ def run_epoch(
             "wet_bce": wet_loss,
             "wet_dice": wet_dice_loss,
             "component": component_loss,
+            "component_vector": component_vector_loss,
+            "speed": speed_loss,
+            "direction": direction_loss,
             "dry_component": dry_component_loss,
         }.items():
             loss_totals[key] += float(value.detach()) * batch_size
@@ -544,6 +628,7 @@ def main() -> None:
         },
         sampling_mode=args.sampling_mode,
         sampling_target_wet_cell_fraction=args.sampling_target_wet_cell_fraction,
+        sampling_strict_category_quotas=args.sampling_strict_category_quotas,
     )
     save_bundle_metadata(bundle, args, output_dir)
     train_loader = make_loader(bundle.train_dataset, bundle.train_sampler, args.num_workers, device)
@@ -562,6 +647,12 @@ def main() -> None:
         "dropout": args.dropout,
     }
     model = Stage1TimestampModel(**model_config).to(device)
+    if args.initial_checkpoint is not None:
+        initial = torch.load(args.initial_checkpoint.resolve(), map_location=device, weights_only=False)
+        if initial.get("model_config") != model_config:
+            raise ValueError("Initial checkpoint model configuration does not match this run")
+        model.load_state_dict(initial["model_state_dict"])
+        print(f"[Initialization] loaded {args.initial_checkpoint.resolve()}")
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.learning_rate, weight_decay=args.weight_decay
     )
@@ -645,6 +736,10 @@ def main() -> None:
                 print(f"Early stopping at epoch {epoch}")
                 break
 
+    if not checkpoint_path.exists():
+        raise RuntimeError(
+            "Training produced no finite selectable checkpoint; inspect the first non-finite loss error"
+        )
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     test_metrics = run_epoch(model, test_loader, device, args, None)

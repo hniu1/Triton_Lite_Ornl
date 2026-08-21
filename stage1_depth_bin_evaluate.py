@@ -119,6 +119,8 @@ def main():
                 batch["block_features"], batch["static"], batch["mask"],
                 shared_event_time=True,
             )
+            if bool(config.get("couple_depth_with_wet_probability", False)):
+                depth = depth * torch.sigmoid(wet_logits)
             valid = batch["mask"] > 0.5
             true_depth = batch["depth"]
             true_cx = batch["component_x"]

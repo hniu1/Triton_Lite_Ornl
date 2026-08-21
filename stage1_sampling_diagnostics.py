@@ -8,7 +8,7 @@ from pathlib import Path
 
 from torch.utils.data import DataLoader
 
-from stage1_data import prepare_stage1_data
+from stage1_data import BalancedLabelBatchSampler, prepare_stage1_data
 
 
 def parse_args():
@@ -23,6 +23,7 @@ def parse_args():
         "--sampling-mode", choices=["anchor", "balanced_batch"], default="anchor"
     )
     parser.add_argument("--sampling-target-wet-cell-fraction", type=float, default=0.0)
+    parser.add_argument("--sampling-strict-category-quotas", action="store_true")
     parser.add_argument("--sample-dry-fraction", type=float, default=0.15)
     parser.add_argument("--sample-boundary-fraction", type=float, default=0.25)
     parser.add_argument("--sample-wet-fraction", type=float, default=0.40)
@@ -37,6 +38,8 @@ def parse_args():
     parser.add_argument("--batches", type=int, default=300)
     parser.add_argument("--wet-threshold", type=float, default=0.05)
     parser.add_argument("--deep-threshold", type=float, default=1.0)
+    parser.add_argument("--boundary-max-fraction", type=float, default=0.10)
+    parser.add_argument("--deep-min-wet-fraction", type=float, default=0.10)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--netcdf-chunk-cache-mb", type=int, default=256)
     parser.add_argument("--max-open-netcdf-handles", type=int, default=8)
@@ -66,6 +69,7 @@ def main():
         sampling_index_dir=args.sampling_index_dir,
         sampling_mode=args.sampling_mode,
         sampling_target_wet_cell_fraction=args.sampling_target_wet_cell_fraction,
+        sampling_strict_category_quotas=args.sampling_strict_category_quotas,
         sampling_category_fractions={
             "dry": args.sample_dry_fraction,
             "boundary": args.sample_boundary_fraction,
@@ -82,6 +86,7 @@ def main():
     loader = DataLoader(bundle.train_dataset, batch_sampler=bundle.train_sampler, num_workers=0)
     counts = Counter()
     event_counts = Counter()
+    phase_counts = Counter()
     wet_cells = 0
     valid_cells = 0
     for batch in loader:
@@ -90,19 +95,25 @@ def main():
         per_patch_valid = mask.sum(dim=(1, 2)).clamp_min(1)
         per_patch_wet = wet.sum(dim=(1, 2))
         fractions = per_patch_wet / per_patch_valid
-        maxima = batch["depth"].masked_fill(~mask, 0.0).amax(dim=(1, 2))
-        for fraction, maximum in zip(fractions.tolist(), maxima.tolist()):
+        p90_depths = []
+        for patch_depth, patch_wet in zip(batch["depth"], wet):
+            wet_depth = patch_depth[patch_wet]
+            p90_depths.append(float(wet_depth.quantile(0.90)) if wet_depth.numel() else 0.0)
+        for fraction, p90_depth in zip(fractions.tolist(), p90_depths):
             if fraction == 0:
                 counts["dry"] += 1
-            elif maximum >= args.deep_threshold:
-                counts["deep"] += 1
-            elif fraction < 0.10:
+            elif fraction < args.boundary_max_fraction:
                 counts["boundary"] += 1
-            elif fraction < 0.50:
-                counts["partial_wet"] += 1
+            elif fraction >= args.deep_min_wet_fraction and p90_depth >= args.deep_threshold:
+                counts["deep"] += 1
             else:
-                counts["mostly_wet"] += 1
+                counts["wet"] += 1
         event_counts.update(str(value) for value in batch["event_id"])
+        if isinstance(bundle.train_sampler, BalancedLabelBatchSampler):
+            event_id = str(batch["event_id"][0])
+            event_position = bundle.train_sampler.event_ids.index(event_id)
+            time_index = int(batch["time_index"][0])
+            phase_counts[bundle.train_sampler.groups[(event_position, time_index)]["phase"]] += 1
         wet_cells += int(wet.sum())
         valid_cells += int(mask.sum())
 
@@ -116,12 +127,20 @@ def main():
         "n_patches": int(n_patches),
         "wet_threshold": float(args.wet_threshold),
         "deep_threshold": float(args.deep_threshold),
+        "boundary_max_fraction": float(args.boundary_max_fraction),
+        "deep_min_wet_fraction": float(args.deep_min_wet_fraction),
+        "deep_depth_statistic": "wet_p90",
         "wet_cell_fraction": wet_cells / max(valid_cells, 1),
         "patch_counts": dict(sorted(counts.items())),
         "patch_fractions": {
             key: value / max(n_patches, 1) for key, value in sorted(counts.items())
         },
         "event_patch_counts": dict(sorted(event_counts.items())),
+        "phase_batch_counts": dict(sorted(phase_counts.items())),
+        "phase_batch_fractions": {
+            key: value / max(args.batches, 1) for key, value in sorted(phase_counts.items())
+        },
+        "strict_category_quotas": bool(args.sampling_strict_category_quotas),
         "split_events": bundle.split_events,
     }
     args.output_path.resolve().parent.mkdir(parents=True, exist_ok=True)

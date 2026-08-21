@@ -105,7 +105,7 @@ python compute_uncertainty_ensemble.py \
 
 ### Submit to HPC
 ```bash
-sbatch compute_uncertainty_ensemble.sh
+sbatch workflows/uncertainty/compute_uncertainty_ensemble.sh
 ```
 
 ## Key Design Decisions

@@ -16,9 +16,10 @@ hydrologic forcing through time t
 
 ![Stage 1 timestamp-conditioned TRITON surrogate architecture](docs/images/stage1_timestamp_surrogate_architecture.png)
 
-The complete data/model contract and commands are documented in
-[`STAGE1_TIMESTAMP_SURROGATE.md`](STAGE1_TIMESTAMP_SURROGATE.md). The older
-workflow remains available as an event-peak baseline.
+Start with [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md). The complete data/model
+contract is documented in
+[`docs/stage1/STAGE1_TIMESTAMP_SURROGATE.md`](docs/stage1/STAGE1_TIMESTAMP_SURROGATE.md).
+The older workflow remains available as an event-peak baseline.
 
 ### Stage 1 inputs
 
@@ -117,9 +118,10 @@ This repository contains two block-wise Triton Lite surrogate workflows:
   flow-component fields at a requested time;
 - the event-peak baseline, which predicts one peak-depth field per event.
 
-The older watershed-level training, tuning, and prediction scripts have been removed.
+Legacy event-peak training, tuning, and prediction scripts are isolated under
+`workflows/blockwise/` and retained for reproducibility.
 
-## Active Files
+## Repository layout
 
 ```text
 ├── data_preprocessing/
@@ -136,29 +138,19 @@ The older watershed-level training, tuning, and prediction scripts have been rem
 │   ├── README_m2_blocks.md
 │   ├── README_m3_labels_from_netcdf.md
 │   └── README_m4_sampling_index.md
-├── stage1_data.py                            # streaming timestamp/block dataset
-├── stage1_model.py                           # causal TCN + conditioned spatial U-Net
-├── stage1_train.py                           # Stage 1 training and evaluation
-├── stage1_predict.py                         # timestamp-conditioned inference
-├── stage1_sampling_diagnostics.py            # measures dry/wet sample balance
-├── 01_stage1_build_manifest.sh               # dynamic-manifest scheduler job
-├── 01b_stage1_sampling_diagnostics.sh         # original-sampler diagnostics
-├── 02_stage1_build_sampling_index.sh          # per-event M4 array job
-├── 02b_stage1_merge_sampling_index.sh         # merges M4 event shards
-├── 02c_stage1_stratified_sampling_diagnostics.sh # measures new sampler balance
-├── 04_stage1_build_dense_sampling_index.sh    # dense per-event index array
-├── 04b_stage1_merge_dense_sampling_index.sh   # merges dense event shards
-├── 04c_stage1_dense_sampling_diagnostics.sh   # verifies whole-batch balance
-├── 05_stage1_train_max.sh                     # stronger sampling/loss run
-├── 02_stage1_train.sh                        # Stage 1 training scheduler job
-├── blockwise_data.py                       # shared split and normalization helpers
-├── blockwise_matrix_data.py                # builds 80x80 block-local training samples
-├── blockwise_model.py                      # temporal encoder + block encoder + 80x80 decoder
-├── train_blockwise_matrix.py               # trains the 10m block-wise depth-field model
-├── tune_blockwise_matrix.py                # tunes matrix-model hyperparameters
-├── predict_blockwise_matrix.py             # writes matrix predictions from a trained model
-├── STAGE1_TIMESTAMP_SURROGATE.md            # dynamic Stage 1 data/model contract
-├── STAGE1_MAX_PERFORMANCE.md                 # maximum-performance experiment
+├── workflows/
+│   ├── stage1/                              # active ordered Slurm jobs
+│   ├── blockwise/                           # legacy event-peak jobs
+│   └── uncertainty/                         # optional ensemble job
+├── docs/
+│   ├── stage1/                              # active architecture/experiment docs
+│   ├── project/                             # historical decisions and plans
+│   └── images/
+├── plot/                                    # plotting utilities
+├── tests/                                   # unit and smoke tests
+├── stage1_*.py                              # active Stage-1 modules and entry points
+├── blockwise_*.py                           # shared and legacy baseline modules
+├── PROJECT_GUIDE.md                         # workflow/navigation starting point
 └── README.md
 ```
 

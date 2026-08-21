@@ -12,7 +12,7 @@ stronger sampling and supervision.
 Run one event per array task:
 
 ```bash
-sbatch 04_stage1_build_dense_sampling_index.sh
+sbatch workflows/stage1/04_stage1_build_dense_sampling_index.sh
 ```
 
 The dense index requests 50,000 candidates per event, ten times the previous
@@ -22,7 +22,7 @@ spatial candidate probability from flow accumulation.
 After every array task succeeds:
 
 ```bash
-sbatch 04b_stage1_merge_dense_sampling_index.sh
+sbatch workflows/stage1/04b_stage1_merge_dense_sampling_index.sh
 ```
 
 The merged index is written to:
@@ -62,7 +62,7 @@ target is attainable.
 Before training, verify the actual distribution:
 
 ```bash
-sbatch 04c_stage1_dense_sampling_diagnostics.sh
+sbatch workflows/stage1/04c_stage1_dense_sampling_diagnostics.sh
 ```
 
 The diagnostic must show that the full batches—not only anchors—reach the
@@ -120,7 +120,7 @@ The training log and `metrics.json` record every component separately.
 After reviewing the dense-sampler diagnostic:
 
 ```bash
-sbatch 05_stage1_train_max.sh
+sbatch workflows/stage1/05_stage1_train_max.sh
 ```
 
 The run uses:

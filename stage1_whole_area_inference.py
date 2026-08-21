@@ -268,6 +268,8 @@ def main():
                     batch["block_features"], batch["static"], batch["mask"],
                     shared_event_time=True,
                 )
+                if bool(config.get("couple_depth_with_wet_probability", False)):
+                    depth = depth * torch.sigmoid(wet_logits)
                 count = depth.shape[0]
                 predicted_batch = {
                     "depth": depth.cpu().numpy(),

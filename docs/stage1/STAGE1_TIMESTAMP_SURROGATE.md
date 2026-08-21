@@ -1,6 +1,6 @@
 # Stage 1: Timestamp-Conditioned TRITON Surrogate
 
-![Stage-1 timestamp-conditioned surrogate architecture](docs/images/stage1_timestamp_surrogate_architecture.png)
+![Stage-1 timestamp-conditioned surrogate architecture](../images/stage1_timestamp_surrogate_architecture.png)
 
 ## Prediction contract
 
@@ -31,12 +31,12 @@ only after auditing the binary convention.
 - `stage1_model.py`: causal TCN plus conditioned spatial U-Net.
 - `stage1_train.py`: losses, metrics, checkpointing, held-out testing.
 - `stage1_predict.py`: selected event/timestamp/block inference.
-- `01_stage1_build_manifest.sh`: manifest scheduler job.
-- `01b_stage1_sampling_diagnostics.sh`: original-sampler diagnostic job.
-- `02_stage1_build_sampling_index.sh`: per-event label-index array job.
-- `02b_stage1_merge_sampling_index.sh`: merges label-index shards.
-- `02c_stage1_stratified_sampling_diagnostics.sh`: measures full stratified batches.
-- `02_stage1_train.sh`: training scheduler job.
+- `workflows/stage1/01_stage1_build_manifest.sh`: manifest scheduler job.
+- `workflows/stage1/01b_stage1_sampling_diagnostics.sh`: original-sampler diagnostic job.
+- `workflows/stage1/02_stage1_build_sampling_index.sh`: per-event label-index array job.
+- `workflows/stage1/02b_stage1_merge_sampling_index.sh`: merges label-index shards.
+- `workflows/stage1/02c_stage1_stratified_sampling_diagnostics.sh`: measures full stratified batches.
+- `workflows/stage1/02_stage1_train.sh`: training scheduler job.
 
 ## Why labels are streamed
 
@@ -52,7 +52,7 @@ reuse decompressed chunks.
 ## Build the manifest
 
 ```bash
-sbatch 01_stage1_build_manifest.sh
+sbatch workflows/stage1/01_stage1_build_manifest.sh
 ```
 
 The command writes:
@@ -70,11 +70,11 @@ them. Repair rejected events before the final scientific training campaign.
 ## Diagnose and build the label-aware sampler
 
 ```bash
-sbatch 01b_stage1_sampling_diagnostics.sh
-sbatch 02_stage1_build_sampling_index.sh
+sbatch workflows/stage1/01b_stage1_sampling_diagnostics.sh
+sbatch workflows/stage1/02_stage1_build_sampling_index.sh
 # Submit this only after every array task finishes successfully:
-sbatch 02b_stage1_merge_sampling_index.sh
-sbatch 02c_stage1_stratified_sampling_diagnostics.sh
+sbatch workflows/stage1/02b_stage1_merge_sampling_index.sh
+sbatch workflows/stage1/02c_stage1_stratified_sampling_diagnostics.sh
 ```
 
 The first command measures how often the original proxy sampler returns dry
@@ -85,7 +85,7 @@ depth, and hydrograph phase. See
 ## Train
 
 ```bash
-sbatch 02_stage1_train.sh
+sbatch workflows/stage1/02_stage1_train.sh
 ```
 
 The default split is by complete event. Training randomly samples event/time

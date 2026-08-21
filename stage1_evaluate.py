@@ -42,6 +42,14 @@ def main():
         "wet_dice_loss_weight": 0.0,
         "wet_dice_smoothing": 1.0,
         "diagnostic_deep_threshold": 1.0,
+        "couple_depth_with_wet_probability": False,
+        "component_loss_mode": "component_huber",
+        "speed_loss_weight": 0.0,
+        "direction_loss_weight": 0.0,
+        "direction_min_speed": 0.05,
+        "velocity_weight_scale": 0.0,
+        "velocity_weight_reference_speed": 0.25,
+        "velocity_weight_cap": 3.0,
     }
     for key, value in compatibility_defaults.items():
         config.setdefault(key, value)

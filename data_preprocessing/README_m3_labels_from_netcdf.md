@@ -160,7 +160,7 @@ Notes:
 The equivalent scheduler script is:
 
 ```bash
-sbatch 01_stage1_build_manifest.sh
+sbatch workflows/stage1/01_stage1_build_manifest.sh
 ```
 
 The current validated output contains 40 events (`D001` through `D040`), 480

@@ -98,6 +98,8 @@ def main():
                 batch["mask"],
                 shared_event_time=True,
             )
+            if bool(config.get("couple_depth_with_wet_probability", False)):
+                depth = depth * torch.sigmoid(wet_logits)
             count = depth.shape[0]
             for local in range(count):
                 key = keys[offset + local]
