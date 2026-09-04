@@ -17,10 +17,11 @@ efficient batching, values after `t` cannot influence the embedding selected
 at `t`. Per-timestamp LayerNorm is used instead of temporal BatchNorm to
 preserve this property during training as well as inference.
 
-The signed component fields are deliberately named `component_x/y`. The TRITON
-paper states that native U/V output is unit discharge, while the existing
-netCDF converter labels it velocity. Set and document `--component-semantics`
-only after auditing the binary convention.
+The signed component fields are deliberately named `component_x/y`. The
+archived TRITON source audit confirmed that native U/V output is HU/HV unit
+discharge, while the legacy netCDF converter labeled it velocity. Use
+`--component-semantics unit_discharge`; see
+`TRITON_COMPONENT_SEMANTICS_AUDIT.md`.
 
 ## Files
 
@@ -147,7 +148,8 @@ different timestamps do not consume earlier predicted hydraulic states.
 ## Before a production run
 
 1. Repair or regenerate rejected netCDF events.
-2. Resolve whether U/V are velocity or unit discharge.
+2. Derive guarded wet-cell velocity diagnostics from the confirmed HU/HV unit
+   discharge fields when velocity reporting is required.
 3. Select held-out normal and extreme events before tuning.
 4. Benchmark netCDF throughput and tune batch size/chunk-cache size.
 5. Calibrate the wet-probability threshold on validation events only.

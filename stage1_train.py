@@ -267,6 +267,9 @@ class MetricAccumulator:
             "component_count": 0.0,
             "component_abs": 0.0,
             "component_sq": 0.0,
+            "velocity_count": 0.0,
+            "velocity_abs": 0.0,
+            "velocity_sq": 0.0,
             "tp": 0.0,
             "fp": 0.0,
             "fn": 0.0,
@@ -289,6 +292,7 @@ class MetricAccumulator:
         batch,
         wet_threshold: float,
         deep_threshold: float,
+        component_semantics: str = "unknown",
     ):
         mask = batch["mask"] > 0.5
         true_wet = (batch["depth"] >= wet_threshold) & mask
@@ -299,6 +303,18 @@ class MetricAccumulator:
         component_error = torch.cat(
             [(cx - batch["component_x"])[true_wet], (cy - batch["component_y"])[true_wet]]
         )
+        velocity_error = None
+        if component_semantics == "unit_discharge" and true_wet.any():
+            true_depth = batch["depth"][true_wet].clamp_min(wet_threshold)
+            predicted_depth = depth[true_wet].clamp_min(wet_threshold)
+            velocity_error = torch.cat(
+                [
+                    cx[true_wet] / predicted_depth
+                    - batch["component_x"][true_wet] / true_depth,
+                    cy[true_wet] / predicted_depth
+                    - batch["component_y"][true_wet] / true_depth,
+                ]
+            )
         v = self.values
         v["depth_all_count"] += all_error.numel()
         v["depth_all_abs"] += all_error.abs().sum().item()
@@ -309,6 +325,10 @@ class MetricAccumulator:
         v["component_count"] += component_error.numel()
         v["component_abs"] += component_error.abs().sum().item()
         v["component_sq"] += component_error.square().sum().item()
+        if velocity_error is not None:
+            v["velocity_count"] += velocity_error.numel()
+            v["velocity_abs"] += velocity_error.abs().sum().item()
+            v["velocity_sq"] += velocity_error.square().sum().item()
         v["tp"] += (pred_wet & true_wet).sum().item()
         v["fp"] += (pred_wet & ~true_wet & mask).sum().item()
         v["fn"] += (~pred_wet & true_wet).sum().item()
@@ -336,6 +356,13 @@ class MetricAccumulator:
             count = max(v[f"{prefix}_count"], 1.0)
             result[f"{prefix}_mae"] = v[f"{prefix}_abs"] / count
             result[f"{prefix}_rmse"] = float(np.sqrt(v[f"{prefix}_sq"] / count))
+        if v["velocity_count"] > 0:
+            result["derived_velocity_mae"] = (
+                v["velocity_abs"] / v["velocity_count"]
+            )
+            result["derived_velocity_rmse"] = float(
+                np.sqrt(v["velocity_sq"] / v["velocity_count"])
+            )
         precision = v["tp"] / max(v["tp"] + v["fp"], 1.0)
         recall = v["tp"] / max(v["tp"] + v["fn"], 1.0)
         result["wet_precision"] = precision
@@ -523,6 +550,7 @@ def run_epoch(
             batch,
             args.wet_threshold,
             args.diagnostic_deep_threshold,
+            getattr(args, "component_semantics", "unknown"),
         )
     result = metrics.finalize()
     result["loss"] = total_loss / max(total_samples, 1)
@@ -630,6 +658,7 @@ def main() -> None:
         sampling_target_wet_cell_fraction=args.sampling_target_wet_cell_fraction,
         sampling_strict_category_quotas=args.sampling_strict_category_quotas,
     )
+    args.component_semantics = bundle.component_semantics
     save_bundle_metadata(bundle, args, output_dir)
     train_loader = make_loader(bundle.train_dataset, bundle.train_sampler, args.num_workers, device)
     val_loader = make_loader(bundle.val_dataset, bundle.val_sampler, args.num_workers, device)

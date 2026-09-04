@@ -21,6 +21,6 @@ python -u data_preprocessing/m3_build_dynamic_manifest.py \
   --events-csv processed_data/timestamp_stage1/m1_events/events.csv \
   --labels-10m-dir processed_data/timestamp_stage1/m3_labels_10m \
   --watershed-id conasauga \
-  --component-semantics velocity \
+  --component-semantics unit_discharge \
   --skip-incomplete \
   --output-dir processed_data/timestamp_stage1/m3_dynamic_manifest

@@ -37,9 +37,9 @@ The current results support this diagnosis:
 | Ungated whole-domain D030 wet F1 | 0.555 | Raw depth produces excessive inundation |
 | Gated whole-domain D030 wet F1 | 0.789 | Classification/gating helps extent substantially |
 | Gated whole-domain wet-depth RMSE | 0.875 m | Depth magnitude remains inaccurate |
-| Gated velocity-component RMSE | 0.0802 m/s | Gating does not improve wet-cell flow |
+| Gated unit-discharge component RMSE | 0.0802 m²/s | Gating does not improve wet-cell flow |
 | V4 wet-depth RMSE | 0.903 m | Sampling and loss changes alone made depth worse |
-| V4 velocity-component RMSE | 0.0927 m/s | Only a small RMSE improvement versus 0.0950 m/s sampled baseline |
+| V4 unit-discharge component RMSE | 0.0927 m²/s | Only a small RMSE improvement versus 0.0950 m²/s sampled baseline |
 | D030 transition failures | t=0, 140, 360, 440 | Model retains flooding when the true system drains |
 
 V4 corrected the sampler exactly and introduced stronger losses, but its
@@ -59,10 +59,10 @@ The dynamic manifest contains:
 - 8 validation events;
 - D030 as the held-out test event.
 
-The netCDF manifest labels depth in meters and both components in `m s-1`.
-However, TRITON documentation describes primary vector output as two-dimensional
-unit discharge, so the binary conversion and variable semantics must still be
-audited against the actual TRITON configuration before final scientific use.
+The legacy netCDF attributes label depth in meters and both components in
+`m s-1`. A subsequent audit of the archived executable source proved that the
+components are the conserved HU/HV unit-discharge fields in `m²/s`; see
+`TRITON_COMPONENT_SEMANTICS_AUDIT.md`. The numerical arrays are unchanged.
 
 ### What this dataset is sufficient for
 
@@ -320,4 +320,3 @@ can be considered operationally reliable.
 - [TRITON multi-GPU hydrodynamic model paper](https://www.sciencedirect.com/science/article/pii/S1364815221000773)
 - [Physics-informed hydrodynamic surrogate study](https://www.sciencedirect.com/science/article/pii/S0048969723074430)
 - [SWE-GNN flood-surrogate abstract](https://agu.confex.com/agu/fm23/meetingapp.cgi/Paper/1417355)
-

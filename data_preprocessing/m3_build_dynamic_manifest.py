@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--component-semantics",
         choices=["velocity", "unit_discharge", "unknown"],
-        default="unknown",
+        default="unit_discharge",
         help="Physical meaning of the two signed component variables. Audit this before publication.",
     )
     parser.add_argument(
@@ -160,6 +160,11 @@ def main() -> None:
             print(f"Skipping {event_id}: {exc}")
             continue
         record["path_to_X_event"] = str(event_rows.iloc[0]["path_to_X_event"])
+        if args.component_semantics == "unit_discharge":
+            record["source_component_x_units"] = record["component_x_units"]
+            record["source_component_y_units"] = record["component_y_units"]
+            record["component_x_units"] = "m2 s-1"
+            record["component_y_units"] = "m2 s-1"
         record["forcing_T"] = int(event_rows.iloc[0]["T"])
         record["forcing_F"] = int(event_rows.iloc[0]["F"])
         if record["forcing_T"] != record["n_times"]:
@@ -178,9 +183,9 @@ def main() -> None:
         "grid_shape": list(expected_grid_shape),
         "n_events": int(len(manifest)),
         "event_ids": manifest["event_id"].tolist(),
-        "warning": (
-            "TRITON documentation describes native U/V outputs as unit discharge. "
-            "Confirm the source binary convention before treating these components as velocity."
+        "component_semantics_evidence": (
+            "Archived TRITON source assigns g_HUa=HU and g_HVa=HV, writes those "
+            "arrays directly as U/V, and computes velocity internally as HU/H and HV/H."
         ),
     }
     (output_dir / "dynamic_metadata.json").write_text(json.dumps(metadata, indent=2))

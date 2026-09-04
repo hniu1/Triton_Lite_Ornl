@@ -81,10 +81,11 @@ The shared decoder feeds three heads:
 - **Wet/dry:** one `80 x 80` logit map; sigmoid gives flood probability.
 - **Signed components:** two `80 x 80` maps for the x and y flow components.
 
-The component outputs are intentionally not called velocity in the model. The
-TRITON publication describes native U/V output as unit discharge, while the
-current netCDF metadata labels it velocity. This physical meaning must be
-audited before final training and publication.
+The component outputs are intentionally not called velocity in the model. An
+audit of the archived simulation source confirmed that native U/V are the
+conserved HU/HV fields (unit discharge in `m²/s`). Legacy netCDF variable names
+and attributes call them velocity, but the numerical arrays are unchanged. See
+`docs/stage1/TRITON_COMPONENT_SEMANTICS_AUDIT.md`.
 
 ### Training objective
 

@@ -85,7 +85,10 @@ def draw(ax, array, title, cmap, vmin, vmax):
     return image
 
 
-def plot_timestamp(true_maps, predicted_maps, time_index, elapsed_hours, output_path, max_display_size, dpi):
+def plot_timestamp(
+    true_maps, predicted_maps, time_index, elapsed_hours, output_path,
+    max_display_size, dpi, component_label="Velocity", component_units="m/s",
+):
     rows, cols = true_maps["depth"].shape
     stride = max(1, math.ceil(max(rows, cols) / max_display_size))
     true = {key: value[::stride, ::stride] for key, value in true_maps.items()}
@@ -94,9 +97,9 @@ def plot_timestamp(true_maps, predicted_maps, time_index, elapsed_hours, output_
     predicted["speed"] = np.hypot(predicted["component_x"], predicted["component_y"])
     rows_to_plot = [
         ("depth", "Water depth", "viridis", "positive"),
-        ("component_x", "Velocity X", "coolwarm", "signed"),
-        ("component_y", "Velocity Y", "coolwarm", "signed"),
-        ("speed", "Speed", "magma", "positive"),
+        ("component_x", f"{component_label} X", "coolwarm", "signed"),
+        ("component_y", f"{component_label} Y", "coolwarm", "signed"),
+        ("speed", f"{component_label} magnitude", "magma", "positive"),
     ]
     fig, axes = plt.subplots(4, 3, figsize=(15, 18), constrained_layout=True)
     for row, (key, label, cmap, scale) in enumerate(rows_to_plot):
@@ -115,7 +118,7 @@ def plot_timestamp(true_maps, predicted_maps, time_index, elapsed_hours, output_
         image_error = draw(
             axes[row, 2], error, f"{label} error (pred − true)", "coolwarm", -error_limit, error_limit
         )
-        units = "m" if key == "depth" else "m/s"
+        units = "m" if key == "depth" else component_units
         fig.colorbar(image_true, ax=axes[row, :2], shrink=0.75, label=units)
         fig.colorbar(image_error, ax=axes[row, 2], shrink=0.75, label=units)
     fig.suptitle(
@@ -129,7 +132,10 @@ def plot_timestamp(true_maps, predicted_maps, time_index, elapsed_hours, output_
     return stride
 
 
-def calculate_metrics(true_maps, predicted_maps, wet_threshold, predicted_wet=None):
+def calculate_metrics(
+    true_maps, predicted_maps, wet_threshold, predicted_wet=None,
+    component_semantics="unknown",
+):
     valid = np.isfinite(true_maps["depth"])
     wet = valid & (true_maps["depth"] >= wet_threshold)
     depth_threshold_wet = valid & (predicted_maps["depth"] >= wet_threshold)
@@ -145,7 +151,7 @@ def calculate_metrics(true_maps, predicted_maps, wet_threshold, predicted_wet=No
     fn = int((wet & ~predicted_wet).sum())
     precision = tp / max(tp + fp, 1)
     recall = tp / max(tp + fn, 1)
-    return {
+    metrics = {
         "valid_cells": int(valid.sum()),
         "wet_cells": int(wet.sum()),
         "wet_cell_fraction": float(wet.sum() / max(valid.sum(), 1)),
@@ -164,6 +170,28 @@ def calculate_metrics(true_maps, predicted_maps, wet_threshold, predicted_wet=No
         "wet_recall_depth_threshold": recall,
         "wet_f1_depth_threshold": 2 * precision * recall / max(precision + recall, 1e-12),
     }
+    if component_semantics == "unit_discharge" and wet.any():
+        true_depth = np.maximum(true_maps["depth"][wet], wet_threshold)
+        predicted_depth = np.maximum(predicted_maps["depth"][wet], wet_threshold)
+        ux_error = (
+            predicted_maps["component_x"][wet] / predicted_depth
+            - true_maps["component_x"][wet] / true_depth
+        )
+        uy_error = (
+            predicted_maps["component_y"][wet] / predicted_depth
+            - true_maps["component_y"][wet] / true_depth
+        )
+        metrics["derived_velocity_mae"] = float(
+            (np.abs(ux_error).sum() + np.abs(uy_error).sum())
+            / max(2 * wet.sum(), 1)
+        )
+        metrics["derived_velocity_rmse"] = float(
+            np.sqrt(
+                (np.square(ux_error).sum() + np.square(uy_error).sum())
+                / max(2 * wet.sum(), 1)
+            )
+        )
+    return metrics
 
 
 def resolve_probability_threshold(args, run_dir):
@@ -315,6 +343,7 @@ def main():
             metrics = calculate_metrics(
                 true_maps, predicted_maps, wet_threshold,
                 predicted_wet_map if probability_threshold is not None else None,
+                config.get("component_semantics", "unknown"),
             )
             record = {
                 "event_id": args.event_id,

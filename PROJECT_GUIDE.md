@@ -11,6 +11,7 @@ retained as a legacy baseline, not as the current development target.
 | `workflows/stage1/` | Ordered Slurm jobs for the active Stage-1 pipeline |
 | `workflows/blockwise/` | Legacy event-peak baseline jobs |
 | `workflows/uncertainty/` | Optional ensemble uncertainty job |
+| `workflows/stage1_transition/` | State-aware Transition V1 smoke and training jobs |
 | `data_preprocessing/` | Data creation and sampling-index tools |
 | `plot/` | Plotting and comparison utilities |
 | `tests/` | Unit and smoke tests |
@@ -118,6 +119,11 @@ the legacy blockwise model and is not yet integrated into Stage-1.
 - `docs/stage1/STAGE1_V4_FINE_TUNING.md`: implemented controlled V4 ablation.
 - `docs/stage1/OPERATIONAL_SURROGATE_DIRECTION.md`: data sufficiency,
   state-transition architecture decision, branch strategy, and fast-win plan.
+- `docs/stage1/STAGE1_TRANSITION_V1.md`: implemented one-step transition prototype.
+- `docs/stage1/PROGRESS_SINCE_GATED_BASELINE.md`: report- and slide-ready change
+  log and performance progression from the gated baseline through Transition V1.
+- `docs/stage1/TRITON_COMPONENT_SEMANTICS_AUDIT.md`: source-code evidence that
+  the stored U/V targets are unit discharge (HU/HV), not velocity.
 - `results/stage1_timestamp_max/D030_whole_area_interval20_gated/RESULTS_SUMMARY.md`:
   gated results and prioritized improvement plan.
 - `docs/project/`: historical status and publication/validation notes.

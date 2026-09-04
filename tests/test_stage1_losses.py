@@ -4,10 +4,37 @@ from argparse import Namespace
 import torch
 
 from data_preprocessing.m4_build_stage1_sampling_index import classify
-from stage1_train import depth_bin_weights, soft_dice_loss, speed_aware_component_losses
+from stage1_train import (
+    MetricAccumulator,
+    depth_bin_weights,
+    soft_dice_loss,
+    speed_aware_component_losses,
+)
 
 
 class Stage1LossTest(unittest.TestCase):
+    def test_unit_discharge_metrics_derive_guarded_velocity(self):
+        accumulator = MetricAccumulator()
+        batch = {
+            "mask": torch.ones(1, 1, 1),
+            "depth": torch.ones(1, 1, 1),
+            "component_x": torch.full((1, 1, 1), 2.0),
+            "component_y": torch.zeros(1, 1, 1),
+        }
+        accumulator.update(
+            depth=torch.full((1, 1, 1), 2.0),
+            wet_prob=torch.ones(1, 1, 1),
+            cx=torch.full((1, 1, 1), 2.0),
+            cy=torch.zeros(1, 1, 1),
+            batch=batch,
+            wet_threshold=0.05,
+            deep_threshold=1.0,
+            component_semantics="unit_discharge",
+        )
+        metrics = accumulator.finalize()
+        self.assertAlmostEqual(metrics["derived_velocity_mae"], 0.5)
+        self.assertAlmostEqual(metrics["derived_velocity_rmse"], 2 ** -0.5)
+
     def test_depth_bin_weights(self):
         args = Namespace(
             depth_weight_shallow=1.0,

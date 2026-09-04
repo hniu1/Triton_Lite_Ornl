@@ -57,9 +57,10 @@ weighted vector Huber
 + 0.1 * direction loss
 ```
 
-Wet-cell weights increase with true speed, capped to prevent a few extreme
-cells from dominating. Direction loss is active only where true speed is at
-least 0.05 m/s.
+Wet-cell weights increase with true component magnitude, capped to prevent a
+few extreme cells from dominating. Direction loss is active only where true
+unit-discharge magnitude is at least 0.05 m²/s. The legacy CLI retains
+`speed_aware` naming for checkpoint compatibility.
 
 ### Revised fine-tuning weights
 

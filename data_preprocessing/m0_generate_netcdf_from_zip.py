@@ -61,8 +61,11 @@ def parse_time_origin(raw: str) -> datetime:
 # Maps output_type prefix to netCDF variable name and long_name
 OUTPUT_TYPE_META: Dict[str, Dict[str, str]] = {
     "H": {"varname": "output_depth", "long_name": "flood_depth", "units": "m", "standard_name": "Depth"},
-    "U": {"varname": "output_velocity_x", "long_name": "flood_velocity_x", "units": "m s-1", "standard_name": "VelocityX"},
-    "V": {"varname": "output_velocity_y", "long_name": "flood_velocity_y", "units": "m s-1", "standard_name": "VelocityY"},
+    # Legacy variable names are retained for compatibility. The archived
+    # TRITON source proves that U/V are the conserved HU/HV fields, i.e.
+    # depth-integrated momentum (unit discharge), rather than velocity.
+    "U": {"varname": "output_velocity_x", "long_name": "flood_unit_discharge_x", "units": "m2 s-1", "standard_name": "UnitDischargeX"},
+    "V": {"varname": "output_velocity_y", "long_name": "flood_unit_discharge_y", "units": "m2 s-1", "standard_name": "UnitDischargeY"},
 }
 
 
@@ -252,6 +255,9 @@ def create_netcdf(
             nc_var.standard_name = meta["standard_name"]
             nc_var.long_name = f"{meta['long_name']}_{output_path.name}"
             nc_var.units = meta["units"]
+            if output_type in {"U", "V"}:
+                nc_var.triton_component_semantics = "unit_discharge"
+                nc_var.legacy_variable_name = "true"
 
             if len(output_files) != n_out_steps:
                 raise ValueError(

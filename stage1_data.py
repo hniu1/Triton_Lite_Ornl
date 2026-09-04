@@ -267,6 +267,7 @@ class SpatiotemporalBatchSampler(Sampler[List[SampleKey]]):
         shuffle: bool,
         time_weights: Optional[Sequence[np.ndarray]] = None,
         block_start_weights: Optional[np.ndarray] = None,
+        minimum_time_index: int = 0,
     ) -> None:
         self.n_events = int(n_events)
         self.n_times = [int(value) for value in n_times]
@@ -277,10 +278,15 @@ class SpatiotemporalBatchSampler(Sampler[List[SampleKey]]):
         self.shuffle = bool(shuffle)
         self.time_weights = time_weights
         self.block_start_weights = block_start_weights
+        self.minimum_time_index = max(0, int(minimum_time_index))
         self.epoch = 0
         if batches_per_epoch is None:
             total_time_groups = sum(
-                len(range(0, event_times, self.time_stride)) for event_times in self.n_times
+                sum(
+                    time_index >= self.minimum_time_index
+                    for time_index in range(0, event_times, self.time_stride)
+                )
+                for event_times in self.n_times
             )
             batches_per_spatial_sweep = math.ceil(self.n_blocks / self.batch_size)
             self.batches_per_epoch = total_time_groups * batches_per_spatial_sweep
@@ -301,6 +307,7 @@ class SpatiotemporalBatchSampler(Sampler[List[SampleKey]]):
                 valid_times = np.arange(
                     0, self.n_times[event_position], self.time_stride, dtype=np.int64
                 )
+                valid_times = valid_times[valid_times >= self.minimum_time_index]
                 if self.time_weights is None:
                     time_index = int(rng.choice(valid_times))
                 else:
@@ -323,6 +330,8 @@ class SpatiotemporalBatchSampler(Sampler[List[SampleKey]]):
         candidates: List[Tuple[int, int, int]] = []
         for event_position in range(self.n_events):
             for time_index in range(0, self.n_times[event_position], self.time_stride):
+                if time_index < self.minimum_time_index:
+                    continue
                 for start in range(0, self.n_blocks, self.batch_size):
                     candidates.append((event_position, time_index, start))
         if not candidates:
@@ -693,6 +702,7 @@ def prepare_stage1_data(
     sampling_mode: str = "anchor",
     sampling_target_wet_cell_fraction: float = 0.0,
     sampling_strict_category_quotas: bool = False,
+    minimum_time_index: int = 0,
 ) -> Stage1DataBundle:
     manifest_dir = manifest_dir.resolve()
     manifest = pd.read_parquet(manifest_dir / "dynamic_manifest.parquet")
@@ -869,11 +879,15 @@ def prepare_stage1_data(
                 else None
             ),
             block_start_weights=block_start_weights if name == "train" else None,
+            minimum_time_index=minimum_time_index,
         )
 
     if sampling_index_dir is not None:
         sampling_index_dir = sampling_index_dir.resolve()
         candidates = pd.read_parquet(sampling_index_dir / "sampling_candidates.parquet")
+        candidates = candidates.loc[
+            candidates["time_index"] >= int(minimum_time_index)
+        ].reset_index(drop=True)
         sampling_metadata = json.loads(
             (sampling_index_dir / "sampling_metadata.json").read_text()
         )
