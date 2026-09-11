@@ -1,331 +1,151 @@
-# Triton Lite Block-wise Surrogate
+# Triton Lite Flood Forecasting
 
-## Dynamic Stage-1 pipeline
+This repository is now organized around **Stage 2 V5**, a state-aware flood
+forecasting system for direct 0.5-to-24-hour prediction of 10 m depth, flood
+extent, and flow fields over the Conasauga simulation domain.
 
-The Stage 1 model is a timestamp-conditioned surrogate. It streams full TRITON
-trajectories from netCDF and predicts one block-local hydraulic state at a
-requested event timestamp:
+Start with [PROJECT_GUIDE.md](PROJECT_GUIDE.md). The frozen V5 experiment
+contract and promotion sequence are in
+[docs/stage2/STAGE2_V5_PLAN.md](docs/stage2/STAGE2_V5_PLAN.md).
 
-```text
-hydrologic forcing through time t
-+ requested timestamp t
-+ scalar block attributes
-+ static 10 m terrain rasters and block mask
-    -> depth(t), wet probability(t), component_x(t), component_y(t)
-```
+## Active model
 
-![Stage 1 timestamp-conditioned TRITON surrogate architecture](docs/images/stage1_timestamp_surrogate_architecture.png)
-
-Start with [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md). The complete data/model
-contract is documented in
-[`docs/stage1/STAGE1_TIMESTAMP_SURROGATE.md`](docs/stage1/STAGE1_TIMESTAMP_SURROGATE.md).
-The older workflow remains available as an event-peak baseline.
-
-### Stage 1 inputs
-
-Each sample represents one `(event_id, timestamp, block_id)` combination.
-
-| Input | Default shape | Purpose |
-|---|---:|---|
-| Hydrologic event | `480 x 300` | Ten days of forcing at 30-minute intervals for 300 source locations |
-| Requested time index | scalar | Selects the hydraulic state to predict |
-| Time features | `4` | Event fraction, sine/cosine position, and normalized elapsed hours |
-| Block attributes | `7` | Location and summary terrain/hydrologic properties |
-| Static terrain | `6 x 80 x 80` | DEM, flow accumulation, stream mask, distance to stream, slope, and relative elevation |
-| Block mask | `80 x 80` | Identifies valid cells and excludes padding |
-
-The complete event tensor is loaded for efficient batching, but the temporal
-network is causal: a prediction at time `t` cannot use forcing values after
-`t`. Event, block, and static-feature normalization statistics are computed
-from training events only.
-
-### Temporal and conditioning encoders
-
-The hydrologic forcing passes through an eight-layer temporal convolutional
-network (TCN). Kernel size 3 and dilations `1, 2, 4, ..., 128` give a 511-step
-receptive field, which covers the full 480-step event. Each block contains a
-causal convolution, per-timestamp LayerNorm, GELU activation, dropout, and a
-residual connection. LayerNorm is used instead of temporal BatchNorm to avoid
-leaking future timestamps through training-time statistics.
-
-The TCN representation at the requested timestamp is gathered as a
-128-dimensional event embedding. In parallel:
-
-- a small MLP converts the four time features to a 32-dimensional embedding;
-- a block MLP converts the scalar block attributes to a 64-dimensional embedding.
-
-These three vectors are concatenated (`128 + 32 + 64 = 224`) and projected to
-a 128-dimensional conditioning vector.
-
-### Conditioned spatial U-Net
-
-The six static rasters and block mask enter a three-level U-Net. With the
-default base width of 32 channels, the encoder produces feature maps at:
+V5-A predicts a requested future state in one model application:
 
 ```text
-32 x 80 x 80 -> 64 x 40 x 40 -> 128 x 20 x 20 -> 128 x 10 x 10
+observed states S(t), S(t-1)
++ terrain and block attributes
++ forcing known through t + lead
++ requested lead of 1...48 half-hour steps
+    -> depth, wet probability, HU, HV at t + lead
 ```
 
-The 128-dimensional event/time/block conditioning vector is repeated across
-the `10 x 10` spatial grid and concatenated with the spatial latent map. The
-bottleneck and decoder then reconstruct an `80 x 80` representation using
-bilinear upsampling and U-Net skip connections. This design lets the event
-forcing control the hydraulic response while the terrain encoder determines
-where water can accumulate and move inside the block.
+The direct forecast avoids recursively feeding 48 predictions back into the
+model. Later controlled experiments add input halos, block-specific forcing,
+a hierarchical tile/HUC12 graph, and conservation constraints. Each addition
+must beat V4b and persistence on the same forecast origins and metrics.
 
-### Outputs
+### Implementation status
 
-The shared decoder feeds three heads:
+V5 is currently the **V5-A direct tile model**, not a graph neural network.
+Items 1 and 2 of the seven-part experiment sequence are complete.
 
-- **Depth:** one nonnegative `80 x 80` map; `Softplus` enforces depth `>= 0`.
-- **Wet/dry:** one `80 x 80` logit map; sigmoid gives flood probability.
-- **Signed components:** two `80 x 80` maps for the x and y flow components.
+| Experiment | Status | What exists now |
+|---|---|---|
+| V4b component-policy diagnostics | Complete | Learned, velocity-persistent, and HU/HV-persistent rollouts through 24 h |
+| V5-A direct lead model | Complete | Training, checkpoint selection, and dense 1–48-step evaluation |
+| V5-B input halos | Not implemented | Next isolated spatial-context experiment |
+| V5-C block-specific forcing | Not implemented | Planned aggregation/cross-attention |
+| V5-D multiscale graph | Not implemented | Planned tile and HUC12 message passing |
+| V5-E conservation/coupling | Not implemented | Planned mass and boundary-flux constraints |
+| V5-F Transformer/operator | Not implemented | Deferred controlled backbone comparison |
 
-The component outputs are intentionally not called velocity in the model. An
-audit of the archived simulation source confirmed that native U/V are the
-conserved HU/HV fields (unit discharge in `m²/s`). Legacy netCDF variable names
-and attributes call them velocity, but the numerical arrays are unchanged. See
-`docs/stage1/TRITON_COMPONENT_SEMANTICS_AUDIT.md`.
+### V5-A model structure
 
-### Training objective
+```mermaid
+flowchart LR
+    F["Forcing sequence<br/>480 × 300"] --> TCN["8-layer causal TCN<br/>forcing through target only"]
+    TCN --> FE["Target-time forcing embedding<br/>128"]
 
-The default loss combines five terms:
+    B["Block attributes<br/>7"] --> BE["Block MLP<br/>64"]
+    TT["Target-time features<br/>4"] --> TE["Target-time MLP<br/>32"]
+    OT["Origin-time features<br/>4"] --> OE["Origin-time MLP<br/>32"]
+    L["Forecast lead<br/>1–48 steps"] --> LE["Lead MLP<br/>32"]
 
-```text
-L = wet-cell depth Huber
-  + 0.05 * dry-cell depth penalty
-  + 0.20 * wet/dry BCE
-  + 0.50 * wet-cell component Huber
-  + 0.05 * dry-cell component penalty
+    FE --> C["Concatenate + conditioning MLP<br/>128"]
+    BE --> C
+    TE --> C
+    OE --> C
+    LE --> C
+
+    S0["Origin state S(t)<br/>h, HU, HV"] --> SE["State CNN"]
+    S1["Older state S(t-1)<br/>h, HU, HV"] --> HD["History difference + adapter"]
+    S0 --> HD
+    HD --> SE
+
+    X["Static terrain<br/>6 × 80 × 80 + mask"] --> E1["Tile CNN encoder<br/>80 → 40 → 20 → 10"]
+    SE --> E1
+    C --> BN["Conditioned U-Net bottleneck<br/>10 × 10"]
+    E1 --> BN
+    BN --> D["U-Net decoder<br/>10 → 20 → 40 → 80"]
+
+    D --> DH["Depth-change head Δh"]
+    D --> QH["Unit-discharge heads<br/>ΔHU, ΔHV"]
+    D --> WH["Wet/dry logit head"]
+    D --> AG["Activity gate"]
+    AG --> O["S(t) + gated changes"]
+    DH --> O
+    QH --> O
+    WH --> P["Outputs at t + lead<br/>h, wet probability, HU, HV"]
+    O --> P
 ```
 
-Cells with target depth at least `0.05 m` are considered wet by default. The
-dry-cell terms discourage artificial shallow flooding and nonzero flow in dry
-areas. Training batches share an event and timestamp and contain spatially
-nearby blocks, allowing the netCDF chunk cache to reuse data efficiently.
+One sample represents one `80 × 80` tile. V5-A processes that tile independently;
+it has no neighboring-tile messages, HUC12 nodes, graph edges, or boundary-flux
+exchange. Those enter only in V5-B through V5-E.
 
-### Scope of Stage 1
+### Current V5-A result
 
-Stage 1 predicts each requested timestamp independently. Earlier predicted
-depth or flow maps are **not** fed into later predictions, so prediction error
-does not recursively accumulate through all 480 steps. This makes Stage 1 a
-timestamp emulator rather than an autoregressive simulator; recurrent state
-propagation and cross-block hydraulic exchange belong to the planned Stage 2
-model.
+The completed checkpoint selected epoch 4 using fixed validation leads. On the
+dense D030 development cohort, V5-A beats full-state persistence at 47 of 48
+wet-depth horizons, 44 of 48 wet-F1 horizons, and 46 of 48 physical-score
+horizons. Selected leads include:
 
-This repository contains two block-wise Triton Lite surrogate workflows:
+| Lead | V5-A depth RMSE | Persistence | V5-A wet F1 | Persistence |
+|---:|---:|---:|---:|---:|
+| 0.5 h | 0.3217 m | 0.3682 m | 0.9553 | 0.9515 |
+| 6 h | 0.7152 m | 0.7422 m | 0.9134 | 0.9018 |
+| 12 h | 0.9355 m | 0.9617 m | 0.8667 | 0.8511 |
+| 24 h | 0.8304 m | 0.8989 m | 0.8544 | 0.8359 |
 
-- the timestamp-conditioned Stage 1 model, which predicts depth and signed
-  flow-component fields at a requested time;
-- the event-peak baseline, which predicts one peak-depth field per event.
-
-Legacy event-peak training, tuning, and prediction scripts are isolated under
-`workflows/blockwise/` and retained for reproducibility.
+Derived-velocity RMSE beats persistence at only 2 of 48 horizons, so V5-A is a
+promising depth/extent baseline rather than the final model. D030 has also
+informed model development and is not a pristine final test event.
 
 ## Repository layout
 
 ```text
-├── data_preprocessing/
-│   ├── m0_generate_netcdf_from_zip.py
-│   ├── m1a_build_event_sources.py
-│   ├── m1b_event_to_tensor.py
-│   ├── m2_block_feature_extraction.py
-│   ├── m2_5_prepare_block_static_rasters.py
-│   ├── m3_prepare_10m_label_assets.py
-│   ├── m3_build_dynamic_manifest.py
-│   ├── m4_build_stage1_sampling_index.py
-│   ├── m4_merge_stage1_sampling_index.py
-│   ├── README_m1_events.md
-│   ├── README_m2_blocks.md
-│   ├── README_m3_labels_from_netcdf.md
-│   └── README_m4_sampling_index.md
-├── workflows/
-│   ├── stage1/                              # active ordered Slurm jobs
-│   ├── blockwise/                           # legacy event-peak jobs
-│   └── uncertainty/                         # optional ensemble job
-├── docs/
-│   ├── stage1/                              # active architecture/experiment docs
-│   ├── project/                             # historical decisions and plans
-│   └── images/
-├── plot/                                    # plotting utilities
-├── tests/                                   # unit and smoke tests
-├── stage1_*.py                              # active Stage-1 modules and entry points
-├── blockwise_*.py                           # shared and legacy baseline modules
-├── PROJECT_GUIDE.md                         # workflow/navigation starting point
-└── README.md
+├── stage2/                    # active V5 model, data adapters, train/evaluate code
+├── triton_core/               # shared active data, encoder, metrics, runtime
+├── workflows/stage2/          # active V5 and V4b-diagnostic Slurm jobs
+├── docs/stage2/               # active model and experiment documentation
+├── data_preprocessing/        # shared TRITON/event/static-data preparation
+├── tests/                     # active Stage-2 regression tests
+├── archive/stage1/
+│   ├── code/                  # frozen Stage-1 implementations
+│   ├── docs/                  # Stage-1 reports and architecture records
+│   ├── workflows/             # Stage-1 and transition Slurm workflows
+│   ├── tests/                 # isolated Stage-1 regression tests
+│   ├── PROJECT_GUIDE.md       # archived Stage-1 navigation
+│   └── README.md              # archived Stage-1 project description
+└── results/                   # checkpoints and metrics, retained in place
 ```
 
-## Event-peak baseline training target
+There are no Stage-1 modules at the repository root. Complete historical
+implementations live under `archive/stage1/code/`; reusable active components
+were extracted into `triton_core/`.
 
-The older baseline uses one `(event_id, watershed_id, block_id)` row with an
-event-level spatial target:
+## Current data scope
 
-- `X_event`: event time series from Milestone 1, stored as `X_event.npy` with shape `T x F`
-- `X_block`: static block features from Milestone 2
-- `Y_10m`: an 80x80 peak-depth patch plus a matching block mask from Milestone 3
+- 40 TRITON events
+- 480 half-hour states and 240 hours per event
+- one Conasauga regional simulation domain
+- 34 HUC12 subwatersheds
+- approximately 6,900 spatial tiles
+- `80 x 80` cells per tile at 10 m resolution
+- 300 forcing locations
 
-The model architecture matches the current design direction:
+This supports controlled in-domain V5 development. Operational or cross-region
+claims require newly generated untouched events and additional regional domains.
 
-- temporal encoder over the hydrologic event time series
-- block encoder over static block metadata
-- late fusion
-- spatial decoder to an 80x80 depth field for one block
+## Verification
 
-## Requirements
-
-The active code path requires:
-
-- Python with `numpy`, `pandas`, `scikit-learn`, and `torch`
-- `pyarrow` or `fastparquet` for parquet I/O
-- geospatial dependencies for preprocessing scripts, including `geopandas`, `rasterio`, and `shapely`
-
-Example install:
+Use the project environment and run:
 
 ```bash
-pip install numpy pandas scikit-learn torch pyarrow geopandas rasterio shapely
+python -m unittest discover -s tests
+bash -n workflows/stage2/*.sh
 ```
 
-## Data Processing
-
-The supported preprocessing flow is under [data_preprocessing](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing).
-
-### Milestone 1: Event Tensors
-
-Use:
-
-- `m1a_build_event_sources.py`
-- `m1b_event_to_tensor.py`
-
-Outputs:
-
-- `events.csv`
-- `events/<watershed_id>/<event_id>/X_event.npy`
-
-Reference docs:
-
-- [README_m1_events.md](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing/README_m1_events.md)
-
-### Milestone 2: Block Features
-
-Use:
-
-- `m2_block_feature_extraction.py`
-
-Output:
-
-- `blocks.parquet`
-
-Reference docs:
-
-- [README_m2_blocks.md](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing/README_m2_blocks.md)
-
-### Milestone 3: 10m Label Assets
-
-Use:
-
-- `m0_generate_netcdf_from_zip.py`
-- `m3_prepare_10m_label_assets.py`
-
-Output:
-
-- `events_peak_10m/*.npy`
-- `block_index_10m.npy`
-- `block_index_lookup.parquet`
-- `labels_10m_manifest.parquet`
-- `labels_10m_metadata.json`
-
-Reference docs:
-
-- [README_m3_labels_from_netcdf.md](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/data_preprocessing/README_m3_labels_from_netcdf.md)
-
-## Training
-
-Train the current model with [train_blockwise_matrix.py](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/train_blockwise_matrix.py):
-
-```bash
-/ccs/home/haoranniu/miniconda3/envs/triton/bin/python train_blockwise_matrix.py \
-  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
-  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
-  --labels-10m-dir processed_data/blockwise_global/milestone_03_labels_10m \
-  --output-dir results_blockwise_matrix \
-  --test-events D040
-```
-
-Important behavior:
-
-- splitting is done by event, not by individual event-block rows
-- normalization is fit on the training split only
-- outputs include a model checkpoint, split tables, normalization stats, and masked metrics
-
-### Training Outputs
-
-The training output directory contains:
-
-- `best_model.pt`
-- `metrics.json`
-- `run_config.json`
-- `normalization_stats.npz`
-- `splits/train_samples.csv`
-- `splits/val_samples.csv`
-- `splits/test_samples.csv`
-
-Current implementation scope:
-
-- matrix training
-- matrix hyperparameter tuning
-- matrix inference and evaluation
-
-## Tuning
-
-Tune the matrix model with [tune_blockwise_matrix.py](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/tune_blockwise_matrix.py):
-
-```bash
-/ccs/home/haoranniu/miniconda3/envs/triton/bin/python tune_blockwise_matrix.py \
-  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
-  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
-  --labels-10m-dir processed_data/blockwise_global/milestone_03_labels_10m \
-  --output-dir results_blockwise_matrix_tuning \
-  --test-events D040
-```
-
-Tuning outputs:
-
-- `best_config.json`
-- `trials.json`
-- `summary.json`
-
-The saved `best_config.json` can be passed directly to `train_blockwise_matrix.py` with `--config-json`.
-
-## Inference
-
-Run matrix inference with [predict_blockwise_matrix.py](/lustre/orion/proj-shared/cli138/7hn/triton/Triton_Lite_Ornl/predict_blockwise_matrix.py):
-
-```bash
-/ccs/home/haoranniu/miniconda3/envs/triton/bin/python predict_blockwise_matrix.py \
-  --events-csv processed_data/blockwise_global/milestone_01_events/events.csv \
-  --blocks-parquet processed_data/blockwise_global/milestone_02_blocks/blocks.parquet \
-  --labels-10m-dir processed_data/blockwise_global/milestone_03_labels_10m \
-  --checkpoint results_blockwise_matrix_train/best_model.pt \
-  --normalization-stats results_blockwise_matrix_train/normalization_stats.npz \
-  --output-dir results_blockwise_matrix_predictions \
-  --event-ids D040 \
-  --evaluate
-```
-
-Inference outputs:
-
-- `predictions.npy` with shape `(N, 80, 80)` written as a memmapped `.npy`
-- `prediction_manifest.parquet` with `sample_index`, `event_id`, `watershed_id`, `block_id`, and `block_index`
-- `summary.json`
-- optional `metrics.json` when `--evaluate` is supplied
-
-## Status
-
-Supported now:
-
-- block-wise preprocessing through Milestones 1, 2, and 3
-- block-wise 10m matrix training with `train_blockwise_matrix.py`
-- block-wise 10m matrix tuning with `tune_blockwise_matrix.py`
-- block-wise 10m matrix inference with `predict_blockwise_matrix.py`
-
-The repository now keeps only the active block-wise preprocessing path.
+Stage-1 checkpoints and result directories have not been moved because they
+remain comparison inputs for Stage 2.
