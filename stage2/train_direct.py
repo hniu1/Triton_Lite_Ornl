@@ -33,6 +33,15 @@ def parse_args():
     )
     parser.add_argument("--initial-checkpoint", default="best_model.pt")
     parser.add_argument("--sampling-index-dir", type=Path, default=None)
+    parser.add_argument("--test-events", nargs="+", default=None)
+    parser.add_argument("--data-split-seed", type=int, default=None)
+    parser.add_argument("--no-v4b-initialization", action="store_true")
+    parser.add_argument("--hydraulic-halo-cells", type=int, default=0)
+    parser.add_argument("--forcing-weights-path", type=Path, default=None)
+    parser.add_argument("--local-forcing-embedding-dim", type=int, default=0)
+    parser.add_argument("--velocity-direction-loss-weight", type=float, default=0.0)
+    parser.add_argument("--boundary-flux-loss-weight", type=float, default=0.0)
+    parser.add_argument("--moving-velocity-threshold", type=float, default=0.01)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-horizon-steps", type=int, default=48)
     parser.add_argument("--step-hours", type=float, default=0.5)
@@ -87,7 +96,11 @@ def build_optimizer(model, backbone_lr, new_lr, weight_decay):
 
 
 def build_bundle(base_config, args, sampling_index_dir):
-    data_seed = int(base_config.get("data_split_seed", base_config["seed"]))
+    data_seed = int(
+        args.data_split_seed
+        if args.data_split_seed is not None
+        else base_config.get("data_split_seed", base_config["seed"])
+    )
     cache_mb = (
         int(args.netcdf_chunk_cache_mb)
         if args.netcdf_chunk_cache_mb is not None
@@ -105,7 +118,7 @@ def build_bundle(base_config, args, sampling_index_dir):
         labels_10m_dir=Path(base_config["labels_10m_dir"]),
         static_rasters_dir=Path(base_config["static_rasters_dir"]),
         base_dir=Path("."),
-        test_events=base_config["test_events"],
+        test_events=args.test_events or base_config["test_events"],
         val_fraction=0.2,
         seed=data_seed,
         batch_size=args.batch_size,
@@ -155,6 +168,8 @@ def main():
             max_horizon_steps=args.max_horizon_steps,
             step_hours=args.step_hours,
             history_states=history_states,
+            hydraulic_halo_cells=args.hydraulic_halo_cells,
+            forcing_weights_path=args.forcing_weights_path,
         )
         for name in ("train", "val", "test")
     }
@@ -196,10 +211,15 @@ def main():
             "use_activity_gate": True,
             "activity_gate_initial_bias": -1.5,
             "lead_feature_dim": 4,
+            "hydraulic_halo_cells": args.hydraulic_halo_cells,
+            "local_forcing_embedding_dim": args.local_forcing_embedding_dim,
         }
     )
     model = Stage2DirectLeadModel(**model_config).to(device)
-    loaded, adapted, skipped = load_v4b_initialization(model, initial_checkpoint)
+    if args.no_v4b_initialization:
+        loaded, adapted, skipped = [], [], ["disabled_for_event_fold_integrity"]
+    else:
+        loaded, adapted, skipped = load_v4b_initialization(model, initial_checkpoint)
     print(
         f"[V4b initialization] loaded={len(loaded)} "
         f"adapted={adapted} skipped={skipped}",
@@ -213,6 +233,9 @@ def main():
     )
     loss_args = Namespace(**base_config)
     loss_args.component_semantics = bundle.component_semantics
+    loss_args.velocity_direction_loss_weight = args.velocity_direction_loss_weight
+    loss_args.boundary_flux_loss_weight = args.boundary_flux_loss_weight
+    loss_args.moving_velocity_threshold = args.moving_velocity_threshold
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,6 +244,12 @@ def main():
         "forecast_mode": "direct_origin_to_target",
         "forcing_availability": "known_through_target_time",
         "intermediate_hydraulic_states_used": False,
+        "hydraulic_halo_cells": args.hydraulic_halo_cells,
+        "forcing_weights_path": (
+            str(args.forcing_weights_path.resolve())
+            if args.forcing_weights_path is not None
+            else None
+        ),
         "initial_run_dir": str(initial_run_dir),
         "initial_checkpoint": str(initial_checkpoint_path.resolve()),
         "sampling_index_dir": str(sampling_index_dir),
@@ -241,7 +270,9 @@ def main():
         "num_workers": args.num_workers,
         "seed": args.seed,
         "data_split_seed": int(
-            base_config.get("data_split_seed", base_config["seed"])
+            args.data_split_seed
+            if args.data_split_seed is not None
+            else base_config.get("data_split_seed", base_config["seed"])
         ),
         "disable_cudnn": args.disable_cudnn,
         "wet_threshold": float(base_config["wet_threshold"]),
@@ -249,7 +280,7 @@ def main():
         "component_units": "m2 s-1",
         "model_config": model_config,
         "split_events": bundle.split_events,
-        "test_events": base_config["test_events"],
+        "test_events": args.test_events or base_config["test_events"],
         "manifest_dir": base_config["manifest_dir"],
         "events_csv": base_config["events_csv"],
         "blocks_parquet": base_config["blocks_parquet"],
@@ -285,6 +316,9 @@ def main():
             }
         },
     }
+    run_config["velocity_direction_loss_weight"] = args.velocity_direction_loss_weight
+    run_config["boundary_flux_loss_weight"] = args.boundary_flux_loss_weight
+    run_config["moving_velocity_threshold"] = args.moving_velocity_threshold
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2))
 
     best_score = float("inf")

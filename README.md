@@ -27,17 +27,17 @@ must beat V4b and persistence on the same forecast origins and metrics.
 
 ### Implementation status
 
-V5 is currently the **V5-A direct tile model**, not a graph neural network.
-Items 1 and 2 of the seven-part experiment sequence are complete.
+V5-A remains the completed reference model. The non-graph V5-B/C components
+are implemented and running as controlled event-held-out ablations.
 
 | Experiment | Status | What exists now |
 |---|---|---|
 | V4b component-policy diagnostics | Complete | Learned, velocity-persistent, and HU/HV-persistent rollouts through 24 h |
 | V5-A direct lead model | Complete | Training, checkpoint selection, and dense 1–48-step evaluation |
-| V5-B input halos | Not implemented | Next isolated spatial-context experiment |
-| V5-C block-specific forcing | Not implemented | Planned aggregation/cross-attention |
+| V5-B input halos | Running | 8-cell hydraulic context with central-tile output |
+| V5-C block-specific forcing | Running | Inverse-distance aggregation from 8 of the 300 mapped forcing locations |
 | V5-D multiscale graph | Not implemented | Planned tile and HUC12 message passing |
-| V5-E conservation/coupling | Not implemented | Planned mass and boundary-flux constraints |
+| V5-E conservation/coupling | Partial, running | Velocity-direction and supervised boundary-flux losses; cross-tile conservation remains deferred |
 | V5-F Transformer/operator | Not implemented | Deferred controlled backbone comparison |
 
 ### V5-A model structure
@@ -101,6 +101,14 @@ horizons. Selected leads include:
 Derived-velocity RMSE beats persistence at only 2 of 48 horizons, so V5-A is a
 promising depth/extent baseline rather than the final model. D030 has also
 informed model development and is not a pristine final test event.
+
+### Current event-held-out ablation
+
+Fold 0 holds out eight complete events (`D005`, `D014`, `D018`, `D023`,
+`D024`, `D028`, `D033`, and `D037`). No weights from V4b are loaded, because
+that checkpoint was not trained under these folds. Four otherwise matched
+models isolate baseline, halo, coupling-loss, and localized-forcing effects.
+Only the winning formulation will be promoted to full five-fold evaluation.
 
 ## Repository layout
 

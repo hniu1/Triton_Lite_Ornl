@@ -67,6 +67,12 @@ def main():
         max_horizon_steps=max_horizon,
         step_hours=float(config["step_hours"]),
         history_states=int(config["model_config"]["history_states"]),
+        hydraulic_halo_cells=int(config.get("hydraulic_halo_cells", 0)),
+        forcing_weights_path=(
+            Path(config["forcing_weights_path"])
+            if config.get("forcing_weights_path")
+            else None
+        ),
     )
     checkpoint_path = run_dir / args.checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)

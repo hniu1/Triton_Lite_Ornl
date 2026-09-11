@@ -33,6 +33,8 @@ class Stage2DirectLeadModel(nn.Module):
         use_activity_gate: bool = True,
         activity_gate_initial_bias: float = -1.5,
         lead_feature_dim: int = 4,
+        hydraulic_halo_cells: int = 0,
+        local_forcing_embedding_dim: int = 0,
     ) -> None:
         super().__init__()
         if history_states not in (1, 2):
@@ -44,6 +46,8 @@ class Stage2DirectLeadModel(nn.Module):
         self.history_states = int(history_states)
         self.history_fusion = str(history_fusion)
         self.use_activity_gate = bool(use_activity_gate)
+        self.hydraulic_halo_cells = int(hydraulic_halo_cells)
+        self.local_forcing_embedding_dim = int(local_forcing_embedding_dim)
 
         self.event_encoder = CausalEventEncoder(
             event_features,
@@ -51,6 +55,17 @@ class Stage2DirectLeadModel(nn.Module):
             event_embedding_dim,
             dropout,
             temporal_layers,
+        )
+        self.local_event_encoder = (
+            CausalEventEncoder(
+                1,
+                max(16, temporal_channels // 2),
+                self.local_forcing_embedding_dim,
+                dropout,
+                temporal_layers,
+            )
+            if self.local_forcing_embedding_dim > 0
+            else None
         )
         self.block_encoder = nn.Sequential(
             nn.Linear(block_features, 64),
@@ -69,7 +84,14 @@ class Stage2DirectLeadModel(nn.Module):
         )
         # Keep the V4b condition fields first so its learned condition matrix
         # can initialize the matching prefix exactly.
-        condition_inputs = event_embedding_dim + 64 + 32 + 32 + 32
+        condition_inputs = (
+            event_embedding_dim
+            + self.local_forcing_embedding_dim
+            + 64
+            + 32
+            + 32
+            + 32
+        )
         self.conditioning = nn.Sequential(
             nn.Linear(condition_inputs, conditioning_dim),
             nn.GELU(),
@@ -83,6 +105,11 @@ class Stage2DirectLeadModel(nn.Module):
             else 3
         )
         self.state_encoder = ConvBlock(state_channels, base_channels)
+        self.halo_encoder = (
+            ConvBlock(6 if history_states == 2 else 3, base_channels)
+            if self.hydraulic_halo_cells > 0
+            else None
+        )
         self.history_adapter = (
             nn.Conv2d(3, 3, kernel_size=1)
             if self.history_states == 2 and self.history_fusion == "adapter"
@@ -139,6 +166,9 @@ class Stage2DirectLeadModel(nn.Module):
         older_depth=None,
         older_component_x=None,
         older_component_y=None,
+        forcing_weights=None,
+        hydraulic_context=None,
+        older_hydraulic_context=None,
     ):
         # Evaluating the causal encoder at target_time_index intentionally
         # admits forcing known through the requested valid time, never beyond.
@@ -148,10 +178,20 @@ class Stage2DirectLeadModel(nn.Module):
             ).expand(event.shape[0], -1)
         else:
             event_embedding = self.event_encoder(event, target_time_index)
+        condition_parts = [event_embedding]
+        if self.local_event_encoder is not None:
+            if forcing_weights is None:
+                raise ValueError("Localized-forcing model requires forcing weights")
+            local_event = (event * forcing_weights[:, None, :]).sum(
+                dim=2, keepdim=True
+            )
+            condition_parts.append(
+                self.local_event_encoder(local_event, target_time_index)
+            )
         condition = self.conditioning(
             torch.cat(
-                [
-                    event_embedding,
+                condition_parts
+                + [
                     self.block_encoder(block_features),
                     self.time_encoder(target_time_features),
                     self.origin_time_encoder(origin_time_features),
@@ -182,6 +222,20 @@ class Stage2DirectLeadModel(nn.Module):
 
         x1 = self.enc1(torch.cat([static, mask.unsqueeze(1)], dim=1))
         x1 = x1 + self.state_encoder(state * mask.unsqueeze(1))
+        if self.halo_encoder is not None:
+            if hydraulic_context is None:
+                raise ValueError("Halo model requires hydraulic context")
+            halo_state = hydraulic_context.clone()
+            halo_state[:, 0] = torch.log1p(torch.clamp_min(halo_state[:, 0], 0.0))
+            if self.history_states == 2:
+                if older_hydraulic_context is None:
+                    raise ValueError("Two-state halo model requires older context")
+                older_halo = older_hydraulic_context.clone()
+                older_halo[:, 0] = torch.log1p(torch.clamp_min(older_halo[:, 0], 0.0))
+                halo_state = torch.cat([halo_state, halo_state - older_halo], dim=1)
+            halo_features = self.halo_encoder(halo_state)
+            h = self.hydraulic_halo_cells
+            x1 = x1 + halo_features[:, :, h:-h, h:-h]
         x2 = self.enc2(F.avg_pool2d(x1, 2))
         x3 = self.enc3(F.avg_pool2d(x2, 2))
         pooled = F.avg_pool2d(x3, 2)

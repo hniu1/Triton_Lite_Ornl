@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Iterator, List, Sequence, Tuple
 
 import numpy as np
@@ -47,6 +48,8 @@ class DirectHorizonDataset(Dataset):
         max_horizon_steps: int = 48,
         step_hours: float = 0.5,
         history_states: int = 2,
+        hydraulic_halo_cells: int = 0,
+        forcing_weights_path: Path | None = None,
     ) -> None:
         if max_horizon_steps < 1:
             raise ValueError("Maximum forecast horizon must be positive")
@@ -58,6 +61,16 @@ class DirectHorizonDataset(Dataset):
         self.max_horizon_steps = int(max_horizon_steps)
         self.step_hours = float(step_hours)
         self.history_states = int(history_states)
+        self.hydraulic_halo_cells = int(hydraulic_halo_cells)
+        if self.hydraulic_halo_cells < 0:
+            raise ValueError("Hydraulic halo cannot be negative")
+        self.forcing_weights = (
+            np.load(Path(forcing_weights_path), mmap_mode="r")
+            if forcing_weights_path is not None
+            else None
+        )
+        if self.forcing_weights is not None and self.forcing_weights.shape[1] != 300:
+            raise ValueError("Forcing weights must have shape [tiles, 300]")
 
     def __len__(self) -> int:
         return len(self.base_dataset)
@@ -99,6 +112,17 @@ class DirectHorizonDataset(Dataset):
         target["lead_features"] = lead_time_features(
             lead_steps, self.max_horizon_steps
         )
+        if self.forcing_weights is not None:
+            block_index = int(
+                self.base_dataset.block_rows.iloc[block_position]["block_index"]
+            )
+            target["forcing_weights"] = torch.from_numpy(
+                np.asarray(self.forcing_weights[block_index], dtype=np.float32).copy()
+            )
+        if self.hydraulic_halo_cells:
+            target["hydraulic_context"] = self.base_dataset.hydraulic_context(
+                event_position, origin_time, block_position, self.hydraulic_halo_cells
+            )
         if self.history_states == 2:
             older = self.base_dataset[
                 (event_position, origin_time - 1, block_position)
@@ -107,6 +131,13 @@ class DirectHorizonDataset(Dataset):
             target["older_component_x"] = older["component_x"]
             target["older_component_y"] = older["component_y"]
             target["older_time_index"] = older["time_index"]
+            if self.hydraulic_halo_cells:
+                target["older_hydraulic_context"] = self.base_dataset.hydraulic_context(
+                    event_position,
+                    origin_time - 1,
+                    block_position,
+                    self.hydraulic_halo_cells,
+                )
         return target
 
 
@@ -145,4 +176,3 @@ class RandomLeadTimeBatchSampler(Sampler[List[DirectForecastKey]]):
                 (int(event), int(target), int(block), lead)
                 for event, target, block in batch
             ]
-

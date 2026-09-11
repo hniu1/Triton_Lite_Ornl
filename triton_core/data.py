@@ -176,6 +176,52 @@ class HydraulicTimestampDataset(Dataset):
         self._handles[path] = ds
         return ds
 
+    def hydraulic_context(
+        self, event_position: int, time_index: int, block_position: int, halo: int
+    ) -> torch.Tensor:
+        """Read an unmasked hydraulic window around a tile without target leakage."""
+        if halo < 1:
+            raise ValueError("halo must be positive")
+        event = self.events.iloc[int(event_position)]
+        block = self.block_rows.iloc[int(block_position)]
+        window = self.block_windows[int(block["block_index"])]
+        rows = self.target_rows + 2 * int(halo)
+        cols = self.target_cols + 2 * int(halo)
+        pad_top = (self.target_rows - window.height) // 2
+        pad_left = (self.target_cols - window.width) // 2
+        desired_r0 = window.row_start - pad_top - halo
+        desired_c0 = window.col_start - pad_left - halo
+        desired_r1 = desired_r0 + rows
+        desired_c1 = desired_c0 + cols
+        source_r0 = max(0, desired_r0)
+        source_c0 = max(0, desired_c0)
+        source_r1 = min(self.block_index_grid.shape[0], desired_r1)
+        source_c1 = min(self.block_index_grid.shape[1], desired_c1)
+        destination_r0 = source_r0 - desired_r0
+        destination_c0 = source_c0 - desired_c0
+        destination_r1 = destination_r0 + source_r1 - source_r0
+        destination_c1 = destination_c0 + source_c1 - source_c0
+        ds = self._handle(str(event["resolved_netcdf_path"]))
+        context = np.zeros((3, rows, cols), dtype=np.float32)
+        for channel, name in enumerate(
+            (
+                self.variable_names["depth"],
+                self.variable_names["component_x"],
+                self.variable_names["component_y"],
+            )
+        ):
+            values = self._values(
+                ds.variables[name][
+                    int(time_index), source_r0:source_r1, source_c0:source_c1
+                ]
+            )
+            context[
+                channel,
+                destination_r0:destination_r1,
+                destination_c0:destination_c1,
+            ] = values
+        return torch.from_numpy(context)
+
     @staticmethod
     def _values(array) -> np.ndarray:
         if np.ma.isMaskedArray(array):

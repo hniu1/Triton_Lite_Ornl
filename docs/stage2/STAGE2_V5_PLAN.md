@@ -39,6 +39,21 @@ Checkpoint selection uses the mean validation score over fixed leads 1, 6, 12,
 Only one structural change is promoted at a time. Each candidate must use the
 same split, origins, leads, persistence definitions, and metrics.
 
+## Event-held-out ablation protocol
+
+The 40 events are assigned to five complete-event folds, balanced by forcing
+severity. The first screening run holds out all eight events in fold 0 and
+compares four nested variants: direct baseline, 8-cell hydraulic halo, halo
+plus velocity-direction/boundary-flux supervision, and the same model with a
+tile-local forcing encoder. V4b initialization is disabled for these runs to
+prevent weights previously trained on fold events from leaking into the test.
+
+The localized signal uses inverse-distance weights over the eight nearest
+ordered `Loc` points from the 300-point forcing shapefile. The global forcing
+encoder remains present, making this an added local signal rather than a loss
+of regional context. Full five-fold training is reserved for the winning
+screening formulation.
+
 ## V5-A implementation
 
 The model computes
@@ -80,5 +95,11 @@ sbatch workflows/stage2/01_v5_direct_smoke.sh
 train_job=$(sbatch --parsable workflows/stage2/02_v5_direct_train.sh)
 sbatch --dependency=afterok:${train_job} \
   workflows/stage2/03_v5_direct_dense_24h_eval.sh
-```
 
+# New event-held-out screening ladder (smoke -> 4 training tasks -> 4 evals)
+smoke_job=$(sbatch --parsable workflows/stage2/04_v5b_enhanced_smoke.sh)
+ablation_job=$(sbatch --parsable --dependency=afterok:${smoke_job} \
+  workflows/stage2/05_v5_ablation_fold0.sh)
+sbatch --dependency=aftercorr:${ablation_job} \
+  workflows/stage2/06_v5_ablation_fold0_eval.sh
+```

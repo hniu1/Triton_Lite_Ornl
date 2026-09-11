@@ -14,6 +14,14 @@ from stage2.model import Stage2DirectLeadModel, load_v4b_initialization
 
 
 class _BaseDataset:
+    def __init__(self):
+        class _Rows:
+            class _ILoc:
+                def __getitem__(self, index):
+                    return {"block_index": int(index)}
+            iloc = _ILoc()
+        self.block_rows = _Rows()
+
     def __len__(self):
         return 20
 
@@ -31,6 +39,9 @@ class _BaseDataset:
             "component_x": value + 1.0,
             "component_y": value + 2.0,
         }
+
+    def hydraulic_context(self, event, time_index, block, halo):
+        return torch.full((3, 8 + 2 * halo, 8 + 2 * halo), float(time_index))
 
 
 class _BatchSampler:
@@ -132,6 +143,42 @@ class Stage2V5Test(unittest.TestCase):
         self.assertEqual(len(result), 9)
         self.assertEqual(result[0].shape, (batch, 8, 8))
         self.assertEqual(result[5].shape, (batch, 2, 8, 8))
+
+    def test_halo_and_local_forcing_paths_are_used(self):
+        config = _model_config()
+        config.update(hydraulic_halo_cells=2, local_forcing_embedding_dim=4)
+        model = Stage2DirectLeadModel(**config)
+        batch = 2
+        result = model(
+            event=torch.zeros(batch, 12, 5),
+            target_time_index=torch.tensor([8, 8]),
+            target_time_features=torch.zeros(batch, 4),
+            origin_time_features=torch.zeros(batch, 4),
+            lead_features=torch.zeros(batch, 4),
+            block_features=torch.zeros(batch, 3),
+            static=torch.zeros(batch, 2, 8, 8),
+            mask=torch.ones(batch, 8, 8),
+            origin_depth=torch.ones(batch, 8, 8),
+            origin_component_x=torch.zeros(batch, 8, 8),
+            origin_component_y=torch.zeros(batch, 8, 8),
+            older_depth=torch.ones(batch, 8, 8),
+            older_component_x=torch.zeros(batch, 8, 8),
+            older_component_y=torch.zeros(batch, 8, 8),
+            forcing_weights=torch.full((batch, 5), 0.2),
+            hydraulic_context=torch.ones(batch, 3, 12, 12),
+            older_hydraulic_context=torch.zeros(batch, 3, 12, 12),
+        )
+        self.assertEqual(result[0].shape, (batch, 8, 8))
+
+    def test_direct_dataset_attaches_hydraulic_halo(self):
+        dataset = DirectHorizonDataset(
+            _BaseDataset(), max_horizon_steps=8, history_states=2,
+            hydraulic_halo_cells=2,
+        )
+        sample = dataset[(0, 10, 2, 4)]
+        self.assertEqual(sample["hydraulic_context"].shape, (3, 12, 12))
+        self.assertEqual(sample["older_hydraulic_context"].shape, (3, 12, 12))
+        self.assertEqual(float(sample["hydraulic_context"][0, 0, 0]), 6.0)
 
     def test_v4b_initialization_preserves_condition_prefix(self):
         config = _model_config()

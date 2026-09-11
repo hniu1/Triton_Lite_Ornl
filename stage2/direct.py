@@ -39,6 +39,9 @@ DEVICE_FIELDS = (
     "older_component_x",
     "older_component_y",
     "older_time_index",
+    "forcing_weights",
+    "hydraulic_context",
+    "older_hydraulic_context",
 )
 
 
@@ -104,6 +107,9 @@ def predict_direct(model, batch):
         older_depth=batch.get("older_depth"),
         older_component_x=batch.get("older_component_x"),
         older_component_y=batch.get("older_component_y"),
+        forcing_weights=batch.get("forcing_weights"),
+        hydraulic_context=batch.get("hydraulic_context"),
+        older_hydraulic_context=batch.get("older_hydraulic_context"),
     )
 
 

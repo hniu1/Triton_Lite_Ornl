@@ -226,6 +226,29 @@ def delta_aware_loss_terms(output, batch, args, device):
             regimes["all"],
             getattr(args, "derived_velocity_huber_delta", 0.25),
         )
+    target_speed = torch.linalg.vector_norm(target_velocity, dim=1)
+    predicted_speed = torch.linalg.vector_norm(predicted_velocity, dim=1)
+    moving = (target_speed >= getattr(args, "moving_velocity_threshold", 0.01)).float()
+    moving = moving * target_wet
+    cosine = (
+        (predicted_velocity * target_velocity).sum(dim=1)
+        / (predicted_speed * target_speed).clamp_min(1e-6)
+    ).clamp(-1.0, 1.0)
+    velocity_direction = ((1.0 - cosine) * moving).sum() / moving.sum().clamp_min(1.0)
+
+    # Supervise normal unit discharge on tile boundaries. This is a local,
+    # target-based proxy for boundary flux; cross-tile conservation requires
+    # jointly predicted neighboring tiles and is intentionally deferred.
+    boundary_mask = torch.zeros_like(target_wet)
+    boundary_mask[:, 0, :] = 1.0
+    boundary_mask[:, -1, :] = 1.0
+    boundary_mask[:, :, 0] = 1.0
+    boundary_mask[:, :, -1] = 1.0
+    boundary_mask = boundary_mask * target_wet
+    boundary_flux = 0.5 * (
+        masked_huber(component_x, batch["component_x"], boundary_mask, 0.25)
+        + masked_huber(component_y, batch["component_y"], boundary_mask, 0.25)
+    )
     valid_count = batch["mask"].sum(dim=(-2, -1)).clamp_min(1.0)
     predicted_storage_change = (
         ((depth - batch["previous_depth"]) * batch["mask"]).sum(dim=(-2, -1))
@@ -275,6 +298,8 @@ def delta_aware_loss_terms(output, batch, args, device):
         + args.stable_depth_delta_loss_weight * stable_depth_delta
         + args.component_delta_loss_weight * component_delta_loss
         + args.derived_velocity_loss_weight * derived_velocity
+        + getattr(args, "velocity_direction_loss_weight", 0.0) * velocity_direction
+        + getattr(args, "boundary_flux_loss_weight", 0.0) * boundary_flux
         + args.storage_change_loss_weight * storage_change
         + getattr(args, "activity_gate_loss_weight", 0.0) * activity_gate
     )
@@ -284,6 +309,8 @@ def delta_aware_loss_terms(output, batch, args, device):
             "stable_depth_delta": stable_depth_delta,
             "component_delta": component_delta_loss,
             "derived_velocity": derived_velocity,
+            "velocity_direction": velocity_direction,
+            "boundary_flux": boundary_flux,
             "storage_change": storage_change,
             "activity_gate": activity_gate,
         }
@@ -292,4 +319,3 @@ def delta_aware_loss_terms(output, batch, args, device):
     if nonfinite:
         raise FloatingPointError(f"Non-finite direct-horizon losses: {nonfinite}")
     return values
-
