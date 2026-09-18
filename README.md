@@ -7,6 +7,9 @@ extent, and flow fields over the Conasauga simulation domain.
 Start with [PROJECT_GUIDE.md](PROJECT_GUIDE.md). The frozen V5 experiment
 contract and promotion sequence are in
 [docs/stage2/STAGE2_V5_PLAN.md](docs/stage2/STAGE2_V5_PLAN.md).
+The presentation-ready setup, ablations, three-seed results, decisions, and
+five-fold confirmation protocol are in
+[docs/stage2/V5B_EXPERIMENT_REPORT.md](docs/stage2/V5B_EXPERIMENT_REPORT.md).
 
 ## Active model
 

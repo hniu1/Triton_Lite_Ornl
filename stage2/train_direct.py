@@ -42,6 +42,8 @@ def parse_args():
     parser.add_argument("--velocity-direction-loss-weight", type=float, default=0.0)
     parser.add_argument("--boundary-flux-loss-weight", type=float, default=0.0)
     parser.add_argument("--moving-velocity-threshold", type=float, default=0.01)
+    parser.add_argument("--use-component-correction-gate", action="store_true")
+    parser.add_argument("--component-gate-initial-bias", type=float, default=-3.0)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-horizon-steps", type=int, default=48)
     parser.add_argument("--step-hours", type=float, default=0.5)
@@ -213,6 +215,8 @@ def main():
             "lead_feature_dim": 4,
             "hydraulic_halo_cells": args.hydraulic_halo_cells,
             "local_forcing_embedding_dim": args.local_forcing_embedding_dim,
+            "use_component_correction_gate": args.use_component_correction_gate,
+            "component_gate_initial_bias": args.component_gate_initial_bias,
         }
     )
     model = Stage2DirectLeadModel(**model_config).to(device)

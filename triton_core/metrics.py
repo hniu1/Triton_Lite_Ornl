@@ -26,6 +26,7 @@ class MetricAccumulator:
             "tp": 0.0,
             "fp": 0.0,
             "fn": 0.0,
+            "tn": 0.0,
             "wet_cells": 0.0,
             "valid_cells": 0.0,
             "patches": 0.0,
@@ -46,10 +47,11 @@ class MetricAccumulator:
         wet_threshold: float,
         deep_threshold: float,
         component_semantics: str = "unknown",
+        wet_probability_threshold: float = 0.5,
     ):
         mask = batch["mask"] > 0.5
         true_wet = (batch["depth"] >= wet_threshold) & mask
-        predicted_wet = (wet_prob >= 0.5) & mask
+        predicted_wet = (wet_prob >= float(wet_probability_threshold)) & mask
         depth_error = depth - batch["depth"]
         all_error = depth_error[mask]
         wet_error = depth_error[true_wet]
@@ -89,6 +91,7 @@ class MetricAccumulator:
         values["tp"] += (predicted_wet & true_wet).sum().item()
         values["fp"] += (predicted_wet & ~true_wet & mask).sum().item()
         values["fn"] += (~predicted_wet & true_wet).sum().item()
+        values["tn"] += (~predicted_wet & ~true_wet & mask).sum().item()
         values["wet_cells"] += true_wet.sum().item()
         values["valid_cells"] += mask.sum().item()
         valid_per_patch = mask.sum(dim=(1, 2)).clamp_min(1)
@@ -130,6 +133,18 @@ class MetricAccumulator:
         result["wet_csi"] = values["tp"] / max(
             values["tp"] + values["fp"] + values["fn"], 1.0
         )
+        result["dry_specificity"] = values["tn"] / max(
+            values["tn"] + values["fp"], 1.0
+        )
+        result["dry_false_positive_rate"] = values["fp"] / max(
+            values["tn"] + values["fp"], 1.0
+        )
+        result["dry_negative_predictive_value"] = values["tn"] / max(
+            values["tn"] + values["fn"], 1.0
+        )
+        result["balanced_extent_accuracy"] = 0.5 * (
+            recall + result["dry_specificity"]
+        )
         result["wet_cells"] = values["wet_cells"]
         result["wet_cell_fraction"] = values["wet_cells"] / max(
             values["valid_cells"], 1.0
@@ -145,4 +160,3 @@ class MetricAccumulator:
                 values["patches"], 1.0
             )
         return result
-

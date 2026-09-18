@@ -28,6 +28,18 @@ def parse_args():
     parser.add_argument("--start-time-stride", type=int, default=12)
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--disable-cudnn", action="store_true")
+    parser.add_argument("--wet-probability-threshold", type=float, default=0.5)
+    parser.add_argument("--extent-calibration", type=Path, default=None)
+    parser.add_argument(
+        "--wet-classification-mode", choices=["head", "depth", "or", "and"],
+        default="head",
+    )
+    parser.add_argument(
+        "--component-policy",
+        choices=["learned", "component_persistence", "velocity_persistence"],
+        default="learned",
+    )
+    parser.add_argument("--per-event", action="store_true")
     return parser.parse_args()
 
 
@@ -42,6 +54,18 @@ def main():
     horizons = sorted(set(int(value) for value in args.horizons))
     if not horizons or horizons[0] < 1 or horizons[-1] > max_horizon:
         raise ValueError(f"Horizons must lie inside [1, {max_horizon}]")
+    if not 0.0 <= args.wet_probability_threshold <= 1.0:
+        raise ValueError("Wet probability threshold must lie in [0, 1]")
+    extent_mode = args.wet_classification_mode
+    extent_threshold = args.wet_probability_threshold
+    calibration_source = None
+    if args.extent_calibration is not None:
+        calibration_source = args.extent_calibration.resolve()
+        calibration = json.loads(calibration_source.read_text())
+        extent_mode = calibration["selected_mode"]
+        extent_threshold = float(calibration["selected_probability_threshold"])
+        if not 0.0 <= extent_threshold <= 1.0:
+            raise ValueError("Calibrated wet probability threshold must lie in [0, 1]")
 
     bundle = prepare_hydraulic_data(
         manifest_dir=Path(config["manifest_dir"]),
@@ -78,7 +102,7 @@ def main():
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model = Stage2DirectLeadModel(**checkpoint["model_config"]).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
-    metrics, cohort_batches = evaluate_direct_horizons(
+    evaluation = evaluate_direct_horizons(
         model=model,
         dataset=dataset,
         device=device,
@@ -88,7 +112,16 @@ def main():
         start_time_stride=args.start_time_stride,
         wet_threshold=float(config["wet_threshold"]),
         component_semantics=bundle.component_semantics,
+        wet_probability_threshold=extent_threshold,
+        wet_classification_mode=extent_mode,
+        component_policy=args.component_policy,
+        return_per_event=args.per_event,
     )
+    if args.per_event:
+        metrics, cohort_batches, per_event_metrics = evaluation
+    else:
+        metrics, cohort_batches = evaluation
+        per_event_metrics = None
     payload = {
         "checkpoint": str(checkpoint_path.resolve()),
         "checkpoint_epoch": checkpoint.get("epoch"),
@@ -101,8 +134,14 @@ def main():
         "cohort_batches": cohort_batches,
         "batch_size": args.batch_size,
         "start_time_stride": args.start_time_stride,
+        "wet_probability_threshold": extent_threshold,
+        "wet_classification_mode": extent_mode,
+        "extent_calibration": str(calibration_source) if calibration_source else None,
+        "component_policy": args.component_policy,
         "metrics": metrics,
     }
+    if per_event_metrics is not None:
+        payload["per_event_metrics"] = per_event_metrics
     output_path = (
         args.output_path
         or run_dir / f"{args.split}_dense_24h_direct_metrics.json"

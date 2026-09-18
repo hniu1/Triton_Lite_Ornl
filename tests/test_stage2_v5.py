@@ -8,9 +8,11 @@ from stage2.data import (
     RandomLeadTimeBatchSampler,
     lead_time_features,
 )
-from stage2.direct import select_forecast_batches
+from stage2.calibrate_extent import threshold_grid
+from stage2.direct import apply_component_policy, extent_score, select_forecast_batches
 from stage2.losses import delta_aware_loss_terms
 from stage2.model import Stage2DirectLeadModel, load_v4b_initialization
+from triton_core.metrics import MetricAccumulator
 
 
 class _BaseDataset:
@@ -78,6 +80,11 @@ def _model_config():
 
 
 class Stage2V5Test(unittest.TestCase):
+    def test_extent_threshold_grid_honors_upper_bound(self):
+        values = threshold_grid(0.05, 0.99, 0.025)
+        self.assertAlmostEqual(float(values[-1]), 0.99)
+        self.assertLessEqual(float(values.max()), 0.99)
+
     def test_forecast_selection_reserves_the_full_horizon(self):
         batches = select_forecast_batches(
             n_times=[10],
@@ -169,6 +176,42 @@ class Stage2V5Test(unittest.TestCase):
             older_hydraulic_context=torch.zeros(batch, 3, 12, 12),
         )
         self.assertEqual(result[0].shape, (batch, 8, 8))
+
+    def test_component_correction_gate_starts_near_persistence(self):
+        config = _model_config()
+        config.update(use_component_correction_gate=True, component_gate_initial_bias=-8.0)
+        model = Stage2DirectLeadModel(**config)
+        self.assertAlmostEqual(float(model.component_gate_head.bias.detach()), -8.0)
+
+    def test_extent_metric_accepts_calibrated_probability_threshold(self):
+        batch = {
+            "mask": torch.ones(1, 1, 2),
+            "depth": torch.tensor([[[0.1, 0.0]]]),
+            "component_x": torch.zeros(1, 1, 2),
+            "component_y": torch.zeros(1, 1, 2),
+        }
+        accumulator = MetricAccumulator()
+        accumulator.update(
+            batch["depth"], torch.tensor([[[0.4, 0.3]]]),
+            batch["component_x"], batch["component_y"], batch,
+            wet_threshold=0.05, deep_threshold=1.0,
+            wet_probability_threshold=0.35,
+        )
+        self.assertEqual(accumulator.finalize()["wet_f1"], 1.0)
+        self.assertEqual(accumulator.finalize()["dry_specificity"], 1.0)
+
+    def test_depth_extent_and_velocity_persistence_policies(self):
+        depth = torch.tensor([[[0.2, 0.1]]])
+        output = (depth, torch.zeros_like(depth), torch.zeros_like(depth), torch.zeros_like(depth))
+        self.assertTrue(torch.equal(extent_score(output, "depth", 0.05), torch.ones_like(depth)))
+        batch = {
+            "previous_depth": torch.tensor([[[0.1, 0.0]]]),
+            "previous_component_x": torch.tensor([[[0.02, 1.0]]]),
+            "previous_component_y": torch.tensor([[[-0.01, 1.0]]]),
+        }
+        qx, qy = apply_component_policy(output, batch, "velocity_persistence", 0.05)
+        self.assertTrue(torch.allclose(qx, torch.tensor([[[0.04, 0.0]]])))
+        self.assertTrue(torch.allclose(qy, torch.tensor([[[-0.02, 0.0]]])))
 
     def test_direct_dataset_attaches_hydraulic_halo(self):
         dataset = DirectHorizonDataset(

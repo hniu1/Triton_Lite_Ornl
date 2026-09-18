@@ -113,6 +113,41 @@ def predict_direct(model, batch):
     )
 
 
+def apply_component_policy(output, batch, policy, wet_threshold):
+    """Apply a declared discharge policy while retaining learned depth/extent."""
+    if policy == "learned":
+        return output[2], output[3]
+    if policy == "component_persistence":
+        return batch["previous_component_x"], batch["previous_component_y"]
+    if policy != "velocity_persistence":
+        raise ValueError(f"Unsupported component policy: {policy}")
+    origin_depth = batch["previous_depth"]
+    origin_wet = origin_depth >= float(wet_threshold)
+    denominator = origin_depth.clamp_min(float(wet_threshold))
+    velocity_x = torch.where(
+        origin_wet, batch["previous_component_x"] / denominator, 0.0
+    )
+    velocity_y = torch.where(
+        origin_wet, batch["previous_component_y"] / denominator, 0.0
+    )
+    predicted_depth = output[0]
+    return velocity_x * predicted_depth, velocity_y * predicted_depth
+
+
+def extent_score(output, mode, wet_threshold):
+    probability = torch.sigmoid(output[1])
+    depth_wet = (output[0] >= float(wet_threshold)).to(probability.dtype)
+    if mode == "head":
+        return probability
+    if mode == "depth":
+        return depth_wet
+    if mode == "or":
+        return torch.maximum(probability, depth_wet)
+    if mode == "and":
+        return probability * depth_wet
+    raise ValueError(f"Unsupported wet classification mode: {mode}")
+
+
 def run_direct_train_epoch(model, loader, device, loss_args, optimizer):
     model.train()
     totals = defaultdict(float)
@@ -174,6 +209,10 @@ def evaluate_direct_horizons(
     start_time_stride: int,
     wet_threshold: float,
     component_semantics: str,
+    wet_probability_threshold: float = 0.5,
+    wet_classification_mode: str = "head",
+    component_policy: str = "learned",
+    return_per_event: bool = False,
 ):
     """Evaluate every lead on one max-horizon-eligible origin cohort."""
 
@@ -198,6 +237,13 @@ def evaluate_direct_horizons(
         }
         for horizon in horizons
     }
+    per_event_accumulators = {}
+    if return_per_event:
+        for event_id in dataset.events["event_id"].astype(str):
+            per_event_accumulators[event_id] = {
+                horizon: {"direct": MetricAccumulator(), "persistence": MetricAccumulator()}
+                for horizon in horizons
+            }
     model.eval()
     with torch.no_grad():
         for event_position, origin_time, block_positions in selected:
@@ -218,15 +264,22 @@ def evaluate_direct_horizons(
                 )
                 batch = move_direct_batch(batch, device)
                 output = predict_direct(model, batch)
+                component_x, component_y = apply_component_policy(
+                    output, batch, component_policy, wet_threshold
+                )
+                predicted_extent = extent_score(
+                    output, wet_classification_mode, wet_threshold
+                )
                 accumulators[horizon]["direct"].update(
                     output[0],
-                    torch.sigmoid(output[1]),
-                    output[2],
-                    output[3],
+                    predicted_extent,
+                    component_x,
+                    component_y,
                     batch,
                     wet_threshold,
                     1.0,
                     component_semantics,
+                    wet_probability_threshold,
                 )
                 persistence_wet = (
                     batch["previous_depth"] >= wet_threshold
@@ -240,7 +293,21 @@ def evaluate_direct_horizons(
                     wet_threshold,
                     1.0,
                     component_semantics,
+                    wet_probability_threshold,
                 )
+                if return_per_event:
+                    event_id = str(dataset.events.iloc[event_position]["event_id"])
+                    per_event_accumulators[event_id][horizon]["direct"].update(
+                        output[0], predicted_extent, component_x, component_y, batch,
+                        wet_threshold, 1.0, component_semantics,
+                        wet_probability_threshold,
+                    )
+                    per_event_accumulators[event_id][horizon]["persistence"].update(
+                        batch["previous_depth"], persistence_wet,
+                        batch["previous_component_x"], batch["previous_component_y"],
+                        batch, wet_threshold, 1.0, component_semantics,
+                        wet_probability_threshold,
+                    )
 
     result: Dict[str, dict] = {}
     for horizon in horizons:
@@ -269,7 +336,20 @@ def evaluate_direct_horizons(
             "persistence": persistence,
             "direct_vs_persistence": comparison,
         }
-    return result, len(selected)
+    if not return_per_event:
+        return result, len(selected)
+    per_event = {
+        event_id: {
+            str(horizon): {
+                "lead_hours": horizon * dataset.step_hours,
+                "direct": _finalize(values[horizon]["direct"]),
+                "persistence": _finalize(values[horizon]["persistence"]),
+            }
+            for horizon in horizons
+        }
+        for event_id, values in per_event_accumulators.items()
+    }
+    return result, len(selected), per_event
 
 
 def horizon_selection_score(metrics: Dict[str, dict], velocity_weight: float = 1.0):

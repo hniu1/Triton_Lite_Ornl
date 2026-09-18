@@ -35,6 +35,8 @@ class Stage2DirectLeadModel(nn.Module):
         lead_feature_dim: int = 4,
         hydraulic_halo_cells: int = 0,
         local_forcing_embedding_dim: int = 0,
+        use_component_correction_gate: bool = False,
+        component_gate_initial_bias: float = -3.0,
     ) -> None:
         super().__init__()
         if history_states not in (1, 2):
@@ -48,6 +50,7 @@ class Stage2DirectLeadModel(nn.Module):
         self.use_activity_gate = bool(use_activity_gate)
         self.hydraulic_halo_cells = int(hydraulic_halo_cells)
         self.local_forcing_embedding_dim = int(local_forcing_embedding_dim)
+        self.use_component_correction_gate = bool(use_component_correction_gate)
 
         self.event_encoder = CausalEventEncoder(
             event_features,
@@ -136,6 +139,11 @@ class Stage2DirectLeadModel(nn.Module):
             if self.use_activity_gate
             else None
         )
+        self.component_gate_head = (
+            nn.Conv2d(base_channels, 1, kernel_size=1)
+            if self.use_component_correction_gate
+            else None
+        )
         nn.init.zeros_(self.depth_delta_head.weight)
         nn.init.zeros_(self.depth_delta_head.bias)
         nn.init.zeros_(self.component_delta_head.weight)
@@ -144,6 +152,11 @@ class Stage2DirectLeadModel(nn.Module):
             nn.init.zeros_(self.activity_head.weight)
             nn.init.constant_(
                 self.activity_head.bias, float(activity_gate_initial_bias)
+            )
+        if self.component_gate_head is not None:
+            nn.init.zeros_(self.component_gate_head.weight)
+            nn.init.constant_(
+                self.component_gate_head.bias, float(component_gate_initial_bias)
             )
         if self.history_adapter is not None:
             nn.init.zeros_(self.history_adapter.weight)
@@ -261,6 +274,9 @@ class Stage2DirectLeadModel(nn.Module):
         else:
             depth_delta = raw_depth_delta
             component_delta = raw_component_delta
+        if self.component_gate_head is not None:
+            component_gate = torch.sigmoid(self.component_gate_head(x).squeeze(1)) * mask
+            component_delta = component_delta * component_gate.unsqueeze(1)
 
         depth = torch.clamp_min(origin_depth + depth_delta, 0.0) * mask
         component_x = (origin_component_x + component_delta[:, 0]) * mask
