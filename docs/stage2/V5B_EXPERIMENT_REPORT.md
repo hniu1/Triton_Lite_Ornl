@@ -1,5 +1,19 @@
 # V5-B Hydraulic-Halo Experiment Report
 
+Updated 5 October 2026. Five-fold confirmation is complete. See the
+[leadership briefing](LEADERSHIP_BRIEFING.md) for the current recommendation,
+lead-specific figures, and roadmap, and the
+[five-fold results](../../results/stage2_v5b_crossval/CROSSVAL_RESULTS.md)
+for the numerical summary. Execution has moved to
+[OLCF Riker](RIKER_EXECUTION.md) with the existing Python environment.
+
+The fold-0 results below are historical development evidence. Across all five
+folds, wet-depth RMSE is **0.4202 m versus 0.4762 m persistence (11.8% better)**,
+wet F1 is **0.9034 versus 0.9098**, and learned velocity RMSE is **0.01591 versus
+0.01198 m/s**. Persistent velocity with learned depth gives **0.01212 m/s**.
+Depth improves in all folds and 30 of 40 events. Five-fold testing uses one
+seed per fold; the three-seed study remains limited to fold 0.
+
 ## Executive summary
 
 V5-B tests whether a direct 0.5–24-hour flood surrogate improves when each
@@ -18,8 +32,9 @@ depth improvement, but not a complete improvement for flood extent or velocity.
 
 The promoted scientific candidate is therefore **halo depth**, not the complete
 multi-output halo model. Extent-rule diagnostics and five-fold event evaluation
-are the next confirmatory tests. Velocity persistence remains the operational
-baseline.
+are complete and still show weaker extent and learned velocity than persistence.
+Velocity persistence remains the reference policy. A matched-capacity control
+is needed to isolate gains from neighboring information versus the extra encoder.
 
 ## Scientific motivation
 
@@ -216,8 +231,8 @@ persistence with learned halo depth.
 ## Five-fold confirmation
 
 Fold 0 provides optimization robustness but does not measure variation across
-all possible event splits. The confirmatory experiment trains halo-only models
-for folds 1–4 and reuses the seed-45 fold-0 model. Every one of the 40 events is
+all possible event splits. The completed experiment trained halo-only models
+for folds 1–4 and reused the seed-45 fold-0 model. Every one of the 40 events is
 therefore tested exactly once.
 
 For each fold the pipeline performs:
@@ -228,7 +243,7 @@ For each fold the pipeline performs:
 4. Separate learned-component and velocity-persistence evaluations.
 5. Automatic cross-fold mean and standard-deviation reporting.
 
-Final generated results will be written to:
+Final generated results are available at:
 
 - `results/stage2_v5b_crossval/CROSSVAL_RESULTS.md`
 - `results/stage2_v5b_crossval/CROSSVAL_SUMMARY.json`
@@ -266,4 +281,3 @@ sbatch --dependency=afterok:${evaluation_job} \
 - Initial ablation: `results/stage2_v5_ablation_fold0/`
 - Three-seed robustness: `results/stage2_v5b_robustness_fold0/`
 - Five-fold confirmation: `results/stage2_v5b_crossval/`
-

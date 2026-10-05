@@ -10,6 +10,10 @@ contract and promotion sequence are in
 The presentation-ready setup, ablations, three-seed results, decisions, and
 five-fold confirmation protocol are in
 [docs/stage2/V5B_EXPERIMENT_REPORT.md](docs/stage2/V5B_EXPERIMENT_REPORT.md).
+For the leadership meeting, use
+[LEADERSHIP_BRIEFING.md](docs/stage2/LEADERSHIP_BRIEFING.md), including completed
+five-fold results and V5-B–F decision gates. Current compute execution is on
+[OLCF Riker](docs/stage2/RIKER_EXECUTION.md) with the existing Python environment.
 
 ## Active model
 
@@ -30,17 +34,17 @@ must beat V4b and persistence on the same forecast origins and metrics.
 
 ### Implementation status
 
-V5-A remains the completed reference model. The non-graph V5-B/C components
-are implemented and running as controlled event-held-out ablations.
+V5-A remains the reference model. V5-B has completed three-seed fold-0 testing
+and five-fold event evaluation; the halo architecture is the depth candidate.
 
 | Experiment | Status | What exists now |
 |---|---|---|
 | V4b component-policy diagnostics | Complete | Learned, velocity-persistent, and HU/HV-persistent rollouts through 24 h |
 | V5-A direct lead model | Complete | Training, checkpoint selection, and dense 1–48-step evaluation |
-| V5-B input halos | Running | 8-cell hydraulic context with central-tile output |
-| V5-C block-specific forcing | Running | Inverse-distance aggregation from 8 of the 300 mapped forcing locations |
+| V5-B input halos | Evaluation complete | Depth improves 11.8% over persistence across five folds; full-context halo and capacity controls remain |
+| V5-C block-specific forcing | Initial test complete | Inverse-distance signal tested with coupling; clean hydrologic forcing ablation remains |
 | V5-D multiscale graph | Not implemented | Planned tile and HUC12 message passing |
-| V5-E conservation/coupling | Partial, running | Velocity-direction and supervised boundary-flux losses; cross-tile conservation remains deferred |
+| V5-E conservation/coupling | Partial tests complete | Auxiliary losses and component gate did not resolve velocity; conservative formulation remains |
 | V5-F Transformer/operator | Not implemented | Deferred controlled backbone comparison |
 
 ### V5-A model structure
@@ -105,13 +109,14 @@ Derived-velocity RMSE beats persistence at only 2 of 48 horizons, so V5-A is a
 promising depth/extent baseline rather than the final model. D030 has also
 informed model development and is not a pristine final test event.
 
-### Current event-held-out ablation
+### Historical fold-0 event-held-out ablation
 
 Fold 0 holds out eight complete events (`D005`, `D014`, `D018`, `D023`,
 `D024`, `D028`, `D033`, and `D037`). No weights from V4b are loaded, because
 that checkpoint was not trained under these folds. Four otherwise matched
 models isolate baseline, halo, coupling-loss, and localized-forcing effects.
-Only the winning formulation will be promoted to full five-fold evaluation.
+The halo depth candidate subsequently completed five-fold evaluation; use the
+leadership briefing linked above for the current results and recommendation.
 
 ## Repository layout
 

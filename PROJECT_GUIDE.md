@@ -4,6 +4,8 @@
 
 | Location | Purpose |
 |---|---|
+| `docs/stage2/LEADERSHIP_BRIEFING.md` | Presentation outline, completed results, and gated roadmap |
+| `docs/stage2/RIKER_EXECUTION.md` | Current Riker resources and retained Python environment |
 | `docs/stage2/STAGE2_V5_PLAN.md` | Frozen forecast/evaluation contract and experiment order |
 | `stage2/data.py` | Direct origin/target pairing and lead sampling |
 | `stage2/model.py` | Lead-conditioned V5-A tile model |
@@ -14,6 +16,11 @@
 | `archive/stage1/` | Frozen Stage-1 implementation, docs, and workflows |
 
 ## Active execution order
+
+Compute platform: **Riker**. Existing results below were generated on Andes.
+Use `14_riker_environment_smoke.sh` to validate the existing environment on an
+allocated L40S GPU before new experiments. See `RIKER_EXECUTION.md` for
+resource requests; historical runtime/concurrency estimates do not apply.
 
 1. `00_v4b_component_policy_diagnostics.sh`
 2. `01_v5_direct_smoke.sh`
