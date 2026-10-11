@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import time
 from argparse import Namespace
 from pathlib import Path
 
@@ -20,6 +21,8 @@ from stage2.direct import (
     run_direct_train_epoch,
 )
 from stage2.model import Stage2DirectLeadModel, load_v4b_initialization
+from stage2.graph_data import GraphNeighborhoodDataset, TileTopology
+from stage2.target_integrity import require_corrected_targets, require_corrected_sampling
 from triton_core.data import prepare_hydraulic_data
 from triton_core.runtime import resolve_device
 
@@ -37,6 +40,9 @@ def parse_args():
     parser.add_argument("--data-split-seed", type=int, default=None)
     parser.add_argument("--no-v4b-initialization", action="store_true")
     parser.add_argument("--hydraulic-halo-cells", type=int, default=0)
+    parser.add_argument("--graph-layers", type=int, default=0)
+    parser.add_argument("--graph-hops", type=int, default=None)
+    parser.add_argument("--graph-mode", choices=["neighbors", "self"], default="neighbors")
     parser.add_argument("--forcing-weights-path", type=Path, default=None)
     parser.add_argument("--local-forcing-embedding-dim", type=int, default=0)
     parser.add_argument("--velocity-direction-loss-weight", type=float, default=0.0)
@@ -66,6 +72,8 @@ def parse_args():
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--disable-cudnn", action="store_true")
     parser.add_argument("--save-every-epoch", action="store_true")
+    parser.add_argument("--skip-test-evaluation", action="store_true",
+                        help="Use for smoke checks; do not evaluate held-out test events")
     return parser.parse_args()
 
 
@@ -78,7 +86,7 @@ def seed_everything(seed):
 
 
 def build_optimizer(model, backbone_lr, new_lr, weight_decay):
-    new_prefixes = ("origin_time_encoder.", "lead_encoder.", "conditioning.")
+    new_prefixes = ("origin_time_encoder.", "lead_encoder.", "conditioning.", "graph_")
     backbone = []
     new_conditioning = []
     for name, parameter in model.named_parameters():
@@ -145,6 +153,13 @@ def main():
     args = parse_args()
     if args.max_horizon_steps < 1 or args.step_hours <= 0:
         raise ValueError("Forecast horizon and timestep must be positive")
+    if args.graph_layers < 0:
+        raise ValueError("Graph layers must be nonnegative")
+    graph_hops = args.graph_hops if args.graph_hops is not None else args.graph_layers
+    if graph_hops < 0:
+        raise ValueError("Graph context hops must be nonnegative")
+    if args.graph_layers and graph_hops < args.graph_layers:
+        raise ValueError("Graph context hops must cover all communication layers")
     if any(
         horizon < 1 or horizon > args.max_horizon_steps
         for horizon in args.selection_horizons
@@ -157,11 +172,13 @@ def main():
 
     initial_run_dir = args.initial_run_dir.resolve()
     base_config = json.loads((initial_run_dir / "run_config.json").read_text())
+    require_corrected_targets(base_config["manifest_dir"])
     sampling_index_dir = (
         args.sampling_index_dir.resolve()
         if args.sampling_index_dir is not None
         else Path(base_config["sampling_index_dir"]).resolve()
     )
+    require_corrected_sampling(sampling_index_dir, base_config["manifest_dir"])
     bundle = build_bundle(base_config, args, sampling_index_dir)
     history_states = 2
     direct_datasets = {
@@ -179,19 +196,33 @@ def main():
     train_sampler = RandomLeadTimeBatchSampler(
         bundle.train_sampler, horizons=horizons, seed=args.seed
     )
+    topology = None
+    if graph_hops:
+        base = bundle.train_dataset
+        topology = TileTopology.from_raster(base.block_index_grid, base.block_rows["block_index"])
+        direct_datasets = {name: GraphNeighborhoodDataset(dataset, topology, graph_hops)
+                           for name, dataset in direct_datasets.items()}
+    loader_sampling = (
+        {"sampler": train_sampler, "batch_size": None} if graph_hops
+        else {"batch_sampler": train_sampler}
+    )
     train_loader = DataLoader(
         direct_datasets["train"],
-        batch_sampler=train_sampler,
+        **loader_sampling,
         num_workers=args.num_workers,
         pin_memory=device.type == "cuda",
         persistent_workers=args.num_workers > 0,
     )
 
     initial_checkpoint_path = initial_run_dir / args.initial_checkpoint
-    initial_checkpoint = torch.load(
-        initial_checkpoint_path, map_location=device, weights_only=False
-    )
-    source_model_config = initial_checkpoint["model_config"]
+    initial_checkpoint = None
+    if args.no_v4b_initialization:
+        source_model_config = base_config["model_config"]
+    else:
+        initial_checkpoint = torch.load(
+            initial_checkpoint_path, map_location=device, weights_only=False
+        )
+        source_model_config = initial_checkpoint["model_config"]
     model_config = {
         key: source_model_config[key]
         for key in (
@@ -217,6 +248,8 @@ def main():
             "local_forcing_embedding_dim": args.local_forcing_embedding_dim,
             "use_component_correction_gate": args.use_component_correction_gate,
             "component_gate_initial_bias": args.component_gate_initial_bias,
+            "graph_layers": args.graph_layers,
+            "graph_mode": args.graph_mode,
         }
     )
     model = Stage2DirectLeadModel(**model_config).to(device)
@@ -243,19 +276,30 @@ def main():
 
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+    np.savez(output_dir / "normalization.npz", **vars(bundle.normalization))
+    if topology is not None:
+        (output_dir / "graph_topology.json").write_text(json.dumps(topology.metadata(), indent=2))
     run_config = {
         "training_mode": "stage2_v5_direct_lead_tile",
         "forecast_mode": "direct_origin_to_target",
         "forcing_availability": "known_through_target_time",
         "intermediate_hydraulic_states_used": False,
         "hydraulic_halo_cells": args.hydraulic_halo_cells,
+        "graph_layers": args.graph_layers,
+        "graph_mode": args.graph_mode,
+        "graph_hops": graph_hops,
+        "graph_topology_sha256": topology.digest if topology is not None else None,
+        "graph_loss_scope": "central tiles only" if topology is not None else None,
         "forcing_weights_path": (
             str(args.forcing_weights_path.resolve())
             if args.forcing_weights_path is not None
             else None
         ),
         "initial_run_dir": str(initial_run_dir),
-        "initial_checkpoint": str(initial_checkpoint_path.resolve()),
+        "initial_checkpoint": (None if args.no_v4b_initialization
+                               else str(initial_checkpoint_path.resolve())),
+        "skip_test_evaluation": args.skip_test_evaluation,
+        "normalization_fit_training_events": bundle.split_events["train"],
         "sampling_index_dir": str(sampling_index_dir),
         "output_dir": str(output_dir),
         "max_horizon_steps": args.max_horizon_steps,
@@ -330,6 +374,7 @@ def main():
     history = []
     best_path = output_dir / "best_model.pt"
     for epoch in range(1, args.epochs + 1):
+        epoch_started = time.monotonic()
         train_sampler.set_epoch(epoch)
         train_metrics = run_direct_train_epoch(
             model, train_loader, device, loss_args, optimizer
@@ -354,13 +399,15 @@ def main():
             "validation_horizons": validation,
             "validation_batches": validation_batches,
             "selection_score": selection_score,
+            "epoch_seconds": time.monotonic() - epoch_started,
         }
         history.append(record)
         print(
             f"epoch={epoch:03d} train_loss={train_metrics['loss']:.6f} "
             f"train_depth={train_metrics['depth_wet_rmse']:.4f} "
             f"train_f1={train_metrics['wet_f1']:.4f} "
-            f"validation_selection={selection_score:.6f}",
+            f"validation_selection={selection_score:.6f} "
+            f"epoch_seconds={record['epoch_seconds']:.1f}",
             flush=True,
         )
         checkpoint = {
@@ -379,20 +426,25 @@ def main():
             best_score = selection_score
             best_epoch = epoch
             torch.save(checkpoint, best_path)
+        (output_dir / "training_progress.json").write_text(json.dumps(
+            dict(completed_epochs=epoch, requested_epochs=args.epochs,
+                 best_epoch=best_epoch, best_selection_score=best_score, history=history), indent=2))
 
-    selected = torch.load(best_path, map_location=device, weights_only=False)
-    model.load_state_dict(selected["model_state_dict"])
-    test_metrics, test_batches = evaluate_direct_horizons(
-        model=model,
-        dataset=direct_datasets["test"],
-        device=device,
-        horizons=args.selection_horizons,
-        batch_size=args.batch_size,
-        batch_limit=args.selection_batches,
-        start_time_stride=args.selection_start_time_stride,
-        wet_threshold=float(base_config["wet_threshold"]),
-        component_semantics=bundle.component_semantics,
-    )
+    test_metrics, test_batches = {}, 0
+    if not args.skip_test_evaluation:
+        selected = torch.load(best_path, map_location=device, weights_only=False)
+        model.load_state_dict(selected["model_state_dict"])
+        test_metrics, test_batches = evaluate_direct_horizons(
+            model=model,
+            dataset=direct_datasets["test"],
+            device=device,
+            horizons=args.selection_horizons,
+            batch_size=args.batch_size,
+            batch_limit=args.selection_batches,
+            start_time_stride=args.selection_start_time_stride,
+            wet_threshold=float(base_config["wet_threshold"]),
+            component_semantics=bundle.component_semantics,
+        )
     payload = {
         "best_epoch": best_epoch,
         "best_selection_score": best_score,

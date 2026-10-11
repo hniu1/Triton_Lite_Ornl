@@ -1,5 +1,13 @@
 # Flood Forecasting: Leadership Briefing
 
+> **Critical update, 6 October 2026:** raw audit confirmed misordered hydraulic
+> snapshots and clipped negative discharge in the legacy training targets.
+> The numerical results below are historical, not validated forecast skill.
+> Do not present the 11.8% gain or horizon curves as evidence for the intended
+> task. Current priority and meeting message: [target-data audit and repair](TARGET_DATA_AUDIT.md).
+> The earlier briefing is retained below for traceability; its scientific
+> performance/architecture conclusions require corrected-data retraining.
+
 Prepared 5 October 2026. Evidence: completed V5-B five-fold evaluation and
 three-seed experiments on fold 0. Proposed compute platform: OLCF Riker.
 
@@ -151,7 +159,7 @@ the full eight-cell border is not yet used by the full encoder.
 |---|---|---|
 | V5-B: spatial context | Depth evidence complete; audit horizons, expand cohort, add capacity control and retain halo through encoder | Are gains consistent across events, leads, and boundary cells? |
 | V5-C: local forcing | Initial inverse-distance signal tested with unsuccessful coupling losses; no clean rejection of local forcing | Test halo versus halo + upstream/relevant forcing under identical loss; require improvement without material extent/velocity regression |
-| V5-D: graph | Not implemented | Add tile adjacency/upstream communication if residual errors show distant propagation; start small before hierarchical 6,900-tile + 34-HUC12 graph |
+| V5-D: graph | Local pipeline/smoke complete; tiny-cohort depth/extent learning verified, velocity gate failed; no held-out graph benefit established | Resolve output learning/stability before controlled screening; defer hierarchical 6,900-tile + 34-HUC12 graph |
 | V5-E: hydraulic coupling | Auxiliary losses and component gate tested; velocity improvement insufficient | Test wetting/drying consistency and adjacent-tile flux accounting with known source terms; require velocity and mass-budget gains |
 | V5-F: Transformer/operator | Deferred | Compare only after inputs and output semantics are correct; require benefit against matched U-Net at measured compute cost |
 

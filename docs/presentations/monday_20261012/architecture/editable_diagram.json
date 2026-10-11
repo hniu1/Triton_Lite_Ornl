@@ -1,0 +1,626 @@
+[
+  {
+    "kind": "text",
+    "x": 0.55,
+    "y": 0.35,
+    "text": "Direct U-Net with hydraulic halo",
+    "size": 27,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.57,
+    "y": 0.96,
+    "text": "Observed-state, lead-conditioned flood forecasting  |  Implemented V5-B design",
+    "size": 14,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 7.7,
+    "y": 1.55,
+    "w": 5.15,
+    "h": 1.15,
+    "fill": "#E9EEF5",
+    "edge": "#BDCDD9"
+  },
+  {
+    "kind": "text",
+    "x": 7.88,
+    "y": 1.73,
+    "text": "Forcing and forecast conditioning",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 7.88,
+    "y": 2.14,
+    "text": "Causal forcing through t + L\nTile, origin, target and lead embeddings",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 3.02,
+    "w": 3.1,
+    "h": 1.12,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 3.2,
+    "text": "Central terrain + mask",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 3.61,
+    "text": "6 terrain layers; 80 \u00d7 80",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 4.64,
+    "w": 3.1,
+    "h": 1.42,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 4.819999999999999,
+    "text": "Observed hydraulic history",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 5.2299999999999995,
+    "text": "S(t) and S(t \u2212 1)\nS = [h, HU, HV]",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 4.28,
+    "y": 3.61,
+    "w": 2.57,
+    "h": 1.6,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 4.46,
+    "y": 3.79,
+    "text": "Central feature fusion",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 4.46,
+    "y": 4.2,
+    "text": "Static and state CNNs\nHistory-difference adapter\n80 \u00d7 80 features",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.7,
+        3.58
+      ],
+      [
+        3.96,
+        3.58
+      ],
+      [
+        3.96,
+        4.2
+      ],
+      [
+        4.28,
+        4.2
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.7,
+        5.33
+      ],
+      [
+        3.96,
+        5.33
+      ],
+      [
+        3.96,
+        4.72
+      ],
+      [
+        4.28,
+        4.72
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 0.38,
+    "y": 6.83,
+    "w": 6.72,
+    "h": 2.16,
+    "fill": "#F1FAF9",
+    "edge": "#8CC7C6"
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 7.06,
+    "w": 3.1,
+    "h": 1.63,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 7.239999999999999,
+    "text": "Observed hydraulic halo",
+    "size": 14,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 7.6499999999999995,
+    "text": "96 \u00d7 96 at t and t \u2212 1\n8-cell border around center\nCurrent state + history change",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 4.28,
+    "y": 7.06,
+    "w": 2.57,
+    "h": 1.63,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 4.46,
+    "y": 7.239999999999999,
+    "text": "Separate halo CNN",
+    "size": 14,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 4.46,
+    "y": 7.6499999999999995,
+    "text": "Encode 96 \u00d7 96 context\nCrop central features\n80 \u00d7 80 feature crop",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.7,
+        7.87
+      ],
+      [
+        4.28,
+        7.87
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "circle",
+    "x": 7.22,
+    "y": 4.17,
+    "w": 0.46,
+    "h": 0.46,
+    "fill": "#007F83",
+    "edge": "#007F83"
+  },
+  {
+    "kind": "plus",
+    "x": 7.45,
+    "y": 4.4,
+    "text": "+",
+    "color": "#FFFFFF",
+    "size": 19
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        6.85,
+        4.4
+      ],
+      [
+        7.2,
+        4.4
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        6.85,
+        7.87
+      ],
+      [
+        7.45,
+        7.87
+      ],
+      [
+        7.45,
+        4.65
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 8.04,
+    "y": 3.61,
+    "w": 2.05,
+    "h": 1.6,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 8.219999999999999,
+    "y": 3.79,
+    "text": "Spatial encoder",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 8.219999999999999,
+    "y": 4.2,
+    "text": "80 \u2192 40 \u2192 20\nCentral features",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        7.7,
+        4.4
+      ],
+      [
+        8.04,
+        4.4
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 10.65,
+    "y": 5.2,
+    "w": 2.15,
+    "h": 1.57,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 10.83,
+    "y": 5.38,
+    "text": "Bottleneck",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 10.83,
+    "y": 5.79,
+    "text": "10 \u00d7 10\nConcatenate\nconditioning",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        10.09,
+        4.4
+      ],
+      [
+        10.36,
+        4.4
+      ],
+      [
+        10.36,
+        5.98
+      ],
+      [
+        10.65,
+        5.98
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        11.72,
+        2.7
+      ],
+      [
+        11.72,
+        5.2
+      ]
+    ],
+    "color": "#123147",
+    "dashed": false
+  },
+  {
+    "kind": "text",
+    "x": 11.88,
+    "y": 3.39,
+    "text": "Conditioning",
+    "size": 11,
+    "color": "#123147",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 13.48,
+    "y": 3.61,
+    "w": 2.45,
+    "h": 1.6,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 13.66,
+    "y": 3.79,
+    "text": "U-Net decoder",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 13.66,
+    "y": 4.2,
+    "text": "20 \u2192 40 \u2192 80\nSkip-feature fusion",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        12.8,
+        5.98
+      ],
+      [
+        13.12,
+        5.98
+      ],
+      [
+        13.12,
+        4.4
+      ],
+      [
+        13.48,
+        4.4
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        9.06,
+        3.61
+      ],
+      [
+        9.06,
+        3.05
+      ],
+      [
+        14.69,
+        3.05
+      ],
+      [
+        14.69,
+        3.61
+      ]
+    ],
+    "color": "#58707F",
+    "dashed": true
+  },
+  {
+    "kind": "text",
+    "x": 12.94,
+    "y": 2.81,
+    "text": "U-Net skip features",
+    "size": 10,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 16.57,
+    "y": 3.26,
+    "w": 2.82,
+    "h": 2.05,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 16.75,
+    "y": 3.44,
+    "text": "Forecast heads",
+    "size": 14,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 16.75,
+    "y": 3.8499999999999996,
+    "text": "\u0394h, \u0394HU, \u0394HV\nSpatial activity gate\nWet/dry logit head",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        15.93,
+        4.4
+      ],
+      [
+        16.57,
+        4.4
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 14.18,
+    "y": 7.06,
+    "w": 5.21,
+    "h": 1.65,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 14.36,
+    "y": 7.239999999999999,
+    "text": "Central forecast at t + L",
+    "size": 14,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 14.36,
+    "y": 7.6499999999999995,
+    "text": "Observed S(t) + gated residual change\nDepth h \u2265 0; signed HU, HV; wet probability\n80 \u00d7 80 output",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        17.98,
+        5.31
+      ],
+      [
+        17.98,
+        7.06
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "text",
+    "x": 8.02,
+    "y": 7.36,
+    "text": "One requested lead.\nOne model application.\nNo recursive hydraulic-state feedback.",
+    "size": 13,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "line",
+    "points": [
+      [
+        0.57,
+        9.35
+      ],
+      [
+        19.4,
+        9.35
+      ]
+    ],
+    "color": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.55,
+    "text": "Lead L: 0.5\u201324 h  \u2022  HU/HV: signed unit discharge (m\u00b2/s)  \u2022  Halo features are added before spatial downsampling",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.95,
+    "text": "Method schematic, not validated performance evidence. Corrected-data baseline and halo comparisons are pending.",
+    "size": 11,
+    "color": "#58707F",
+    "bold": false
+  }
+]

@@ -1,5 +1,10 @@
 # V5-B Hydraulic-Halo Experiment Report
 
+> **Superseded scientific interpretation, 6 October 2026:** confirmed target
+> conversion defects invalidate the intended chronological forecast evaluation.
+> Results below are preserved as legacy pipeline records, not validated model
+> skill. See [target-data audit](TARGET_DATA_AUDIT.md) before using these tables.
+
 Updated 5 October 2026. Five-fold confirmation is complete. See the
 [leadership briefing](LEADERSHIP_BRIEFING.md) for the current recommendation,
 lead-specific figures, and roadmap, and the

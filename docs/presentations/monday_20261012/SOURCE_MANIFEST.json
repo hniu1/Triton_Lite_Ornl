@@ -1,0 +1,78 @@
+[
+  {
+    "path": "docs/project/MODEL_DESCRIPTION.md",
+    "sha256": "b085785d08711a74fa38157edd779edc71103511c709529da23d68f536df04a4"
+  },
+  {
+    "path": "docs/project/MODEL_STATUS_AND_CHALLENGES_SUMMARY.md",
+    "sha256": "0231be1856b73f442ab40617ff9efb8af471fd941b1a2ddd74365ac51026faa8"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_TIMESTAMP_SURROGATE.md",
+    "sha256": "dcd6bdef0a4d741fed2123625884621aa9394b5e8dfdb36d7bf3c5df805b0535"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_MAX_PERFORMANCE.md",
+    "sha256": "5a4d1c4d0198170980ef84cdb96a7a5d99f351be5578a69e3daeb428aef3b26d"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_V4_FINE_TUNING.md",
+    "sha256": "b23e29f60046dcae652c2b8595c631502ee72cfb489a6100019e446c4fd9eec1"
+  },
+  {
+    "path": "archive/stage1/docs/PROGRESS_SINCE_GATED_BASELINE.md",
+    "sha256": "2d3993c5498b62dc0b42efd1c1a7efc04d25fd63d7991f1b20198a22caec2b5b"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_TRANSITION_V1.md",
+    "sha256": "b372696c4c2bc2705b8ba9da118f228809767928a834ab3f106afcf3c4fb93e6"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_TRANSITION_V2.md",
+    "sha256": "926721d1367f6ec3e03e252c26e1244d406edef54936d206991bf9110b47963e"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_TRANSITION_V3.md",
+    "sha256": "acb916f9640e4c623dd1232cb3f067bc5d71e250bfb24e7ecc8225b7c9ebe5b6"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_TRANSITION_V4A.md",
+    "sha256": "f14bdd81028b269258b0f4df0c859069c49823480553a595472b33c8b8a0bf86"
+  },
+  {
+    "path": "archive/stage1/docs/STAGE1_TRANSITION_V4B.md",
+    "sha256": "bb4fae7936b3588db56cc3ae7198e9ff77d37c01c2d656387ccc01be6b076336"
+  },
+  {
+    "path": "archive/stage1/docs/TRITON_COMPONENT_SEMANTICS_AUDIT.md",
+    "sha256": "7dffe8eb5c76e8e58a8c7bc6d6d9ce8468ca5829d9ae60ae02755020022107a4"
+  },
+  {
+    "path": "docs/stage2/STAGE2_V5_PLAN.md",
+    "sha256": "a8f5dc281e20c9afa84e4288e1bd5f626962d9136357f5d2487a9d863c8e5450"
+  },
+  {
+    "path": "docs/stage2/V5B_EXPERIMENT_REPORT.md",
+    "sha256": "43560b50b20f2e5eb26c108c11e54354320dd58e3454d337c9a3603914fd3dae"
+  },
+  {
+    "path": "docs/stage2/V5D_GRAPH_COMMUNICATION.md",
+    "sha256": "b4e2e06b925d4639f881fb7c3cbfcd7c59532ee877605512203983ddfeabd5ba"
+  },
+  {
+    "path": "docs/stage2/TARGET_DATA_AUDIT.md",
+    "sha256": "64aa96041d2d316c36ed917f81d3ee5181f3462fbebe48ff8ecb0eee66c913a0"
+  },
+  {
+    "path": "docs/stage2/LEADERSHIP_BRIEFING.md",
+    "sha256": "40a9ba1f449c61764f65ed0cbce68d76912f9651d50f04197efe622235a7ca5d"
+  },
+  {
+    "path": "stage2/model.py",
+    "sha256": "1f1dc1618a58771b9296efb1978ee3d2f13b9b5bf06e0eb0308797c4cfb10c47"
+  },
+  {
+    "path": "README.md",
+    "sha256": "f0d867b973a13939964c02a1fd74a6850f0d9475d430ec20da895c5c7b639457"
+  }
+]

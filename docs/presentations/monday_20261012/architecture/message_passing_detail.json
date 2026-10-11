@@ -1,0 +1,286 @@
+[
+  {
+    "kind": "text",
+    "x": 0.55,
+    "y": 0.35,
+    "text": "What happens in one message-passing layer?",
+    "size": 27,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.57,
+    "y": 0.96,
+    "text": "Source tile j \u2192 destination tile i  |  The same learned functions are shared across edges and nodes",
+    "size": 14,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 2.03,
+    "w": 4.06,
+    "h": 2.09,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 2.21,
+    "text": "1  Build each edge message",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 2.71,
+    "text": "m(j\u2192i) = M\u2096([z\u2c7c, z\u1d62, a\u2c7c\u1d62])\nUse source and destination features.\nEdge attributes a are optional.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 5.29,
+    "y": 2.03,
+    "w": 4.06,
+    "h": 2.09,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 5.47,
+    "y": 2.21,
+    "text": "2  Aggregate at destination",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 5.47,
+    "y": 2.71,
+    "text": "m\u0304\u1d62 = mean of incoming messages\nAverage over the tile\u2019s neighbors.\nDegree can vary between tiles.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 9.98,
+    "y": 2.03,
+    "w": 4.06,
+    "h": 2.09,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 10.16,
+    "y": 2.21,
+    "text": "3  Update the destination",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 10.16,
+    "y": 2.71,
+    "text": "z\u1d62 \u2190 z\u1d62 + U\u2096([z\u1d62, m\u0304\u1d62])\nResidual update retains local features.\nNo incoming edges:\nnode stays unchanged.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 14.67,
+    "y": 2.03,
+    "w": 4.71,
+    "h": 2.09,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 14.85,
+    "y": 2.21,
+    "text": "4  Repeat and condition",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 14.85,
+    "y": 2.71,
+    "text": "Repeat for K graph layers.\nc\u2032\u1d62 = c\u1d62 + P(z\u1d62\u1d37 \u2212 z\u1d62\u2070)\nUse c\u2032\u1d62 in the U-Net bottleneck.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        4.66,
+        3.05
+      ],
+      [
+        5.29,
+        3.05
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        9.35,
+        3.05
+      ],
+      [
+        9.98,
+        3.05
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        14.04,
+        3.05
+      ],
+      [
+        14.67,
+        3.05
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 4.9,
+    "w": 5.8,
+    "h": 3.05,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 5.08,
+    "text": "Reading the symbols",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 5.58,
+    "text": "z\u1d62: encoded features for tile i\nM\u2096: learned message MLP\nU\u2096: learned update MLP\nP: learned linear projection\n[ , ]: concatenation; k: graph layer",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 7.1,
+    "y": 4.9,
+    "w": 5.8,
+    "h": 3.05,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 7.279999999999999,
+    "y": 5.08,
+    "text": "Two layers = two spatial hops",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 7.279999999999999,
+    "y": 5.58,
+    "text": "Layer 1 uses adjacent-tile features.\nLayer 2 can carry features from two hops away.\nThese are spatial exchanges, not forecast steps.\nAll nodes still share the same origin and lead.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 13.6,
+    "y": 4.9,
+    "w": 5.78,
+    "h": 3.05,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 13.78,
+    "y": 5.08,
+    "text": "How we test its value",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 13.78,
+    "y": 5.58,
+    "text": "Same U-Net and connected context batches:\n\u2022 U-Net without graph messages\n\u2022 Local capacity control with self edges\n\u2022 Graph with actual adjacency edges\nMatch data, losses and evaluation origins.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "line",
+    "points": [
+      [
+        0.57,
+        9.35
+      ],
+      [
+        19.4,
+        9.35
+      ]
+    ],
+    "color": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.55,
+    "text": "Messages have no water-volume interpretation; physical conservation requires a separate formulation.",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.95,
+    "text": "Implemented local graph prototype; corrected-data forecasting benefit remains unproven.",
+    "size": 11,
+    "color": "#58707F",
+    "bold": false
+  }
+]

@@ -1,0 +1,809 @@
+[
+  {
+    "kind": "text",
+    "x": 0.55,
+    "y": 0.35,
+    "text": "Direct U-Net with halo and tile graph context",
+    "size": 27,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.57,
+    "y": 0.96,
+    "text": "Unified architecture  |  Halo enters early spatial features; optional graph messages modify bottleneck conditioning",
+    "size": 14,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 4.48,
+    "y": 1.82,
+    "w": 2.64,
+    "h": 1.46,
+    "fill": "#F0EAF8",
+    "edge": "#BAA8D4"
+  },
+  {
+    "kind": "text",
+    "x": 4.66,
+    "y": 2.0,
+    "text": "Tile node encoder",
+    "size": 15,
+    "color": "#7050A3",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 4.66,
+    "y": 2.5,
+    "text": "Pooled encoder features\nFour boundary summaries\nConditioning c \u2192 z\u2070",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 7.68,
+    "y": 1.82,
+    "w": 2.64,
+    "h": 1.46,
+    "fill": "#F0EAF8",
+    "edge": "#BAA8D4"
+  },
+  {
+    "kind": "text",
+    "x": 7.859999999999999,
+    "y": 2.0,
+    "text": "Message passing",
+    "size": 15,
+    "color": "#7050A3",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 7.859999999999999,
+    "y": 2.5,
+    "text": "Neighbor tile vectors\nMean messages + updates\nK layers \u2192 z\u1d37",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        7.12,
+        2.56
+      ],
+      [
+        7.68,
+        2.56
+      ]
+    ],
+    "color": "#7050A3",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 10.9,
+    "y": 1.82,
+    "w": 3.09,
+    "h": 1.46,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 11.08,
+    "y": 2.0,
+    "text": "Forecast conditioning",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 11.08,
+    "y": 2.5,
+    "text": "Causal forcing through t + L\nTile, origin, target and lead\nConditioning vector c",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 10.9,
+    "y": 3.63,
+    "w": 3.09,
+    "h": 1.02,
+    "fill": "#F0EAF8",
+    "edge": "#BAA8D4"
+  },
+  {
+    "kind": "text",
+    "x": 11.08,
+    "y": 3.81,
+    "text": "Graph conditioning",
+    "size": 15,
+    "color": "#7050A3",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 11.08,
+    "y": 4.31,
+    "text": "c\u2032 = c + P(z\u1d37 \u2212 z\u2070)",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        10.32,
+        2.56
+      ],
+      [
+        10.59,
+        2.56
+      ],
+      [
+        10.59,
+        4.16
+      ],
+      [
+        10.9,
+        4.16
+      ]
+    ],
+    "color": "#7050A3",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        12.445,
+        3.28
+      ],
+      [
+        12.445,
+        3.63
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        11.66,
+        1.82
+      ],
+      [
+        11.66,
+        1.48
+      ],
+      [
+        5.8,
+        1.48
+      ],
+      [
+        5.8,
+        1.82
+      ]
+    ],
+    "color": "#58707F",
+    "dashed": false
+  },
+  {
+    "kind": "text",
+    "x": 7.38,
+    "y": 1.29,
+    "text": "base conditioning c",
+    "size": 10,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 4.45,
+    "w": 3.1,
+    "h": 1.16,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 4.63,
+    "text": "Central terrain + mask",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 5.13,
+    "text": "6 terrain layers; 80 \u00d7 80",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 6.01,
+    "w": 3.1,
+    "h": 1.16,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 6.1899999999999995,
+    "text": "Observed hydraulic history",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 6.6899999999999995,
+    "text": "S(t), S(t \u2212 1); h, HU, HV",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 4.48,
+    "y": 5.15,
+    "w": 2.64,
+    "h": 1.53,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 4.66,
+    "y": 5.33,
+    "text": "Central feature fusion",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 4.66,
+    "y": 5.83,
+    "text": "Static and state CNNs\nHistory adapter\n80 \u00d7 80 features",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.7,
+        5.03
+      ],
+      [
+        4.08,
+        5.03
+      ],
+      [
+        4.08,
+        5.53
+      ],
+      [
+        4.48,
+        5.53
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.7,
+        6.59
+      ],
+      [
+        4.08,
+        6.59
+      ],
+      [
+        4.08,
+        6.13
+      ],
+      [
+        4.48,
+        6.13
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 7.68,
+    "y": 5.15,
+    "w": 2.64,
+    "h": 1.53,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 7.859999999999999,
+    "y": 5.33,
+    "text": "Spatial encoder",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 7.859999999999999,
+    "y": 5.83,
+    "text": "80 \u2192 40 \u2192 20\nCentral raster features",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "circle",
+    "x": 7.23,
+    "y": 5.73,
+    "w": 0.3,
+    "h": 0.3,
+    "fill": "#007F83",
+    "edge": "#007F83"
+  },
+  {
+    "kind": "plus",
+    "x": 7.38,
+    "y": 5.88,
+    "text": "+",
+    "size": 13,
+    "color": "#FFFFFF"
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        7.12,
+        5.88
+      ],
+      [
+        7.23,
+        5.88
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        7.53,
+        5.88
+      ],
+      [
+        7.68,
+        5.88
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 10.9,
+    "y": 5.3,
+    "w": 3.09,
+    "h": 1.23,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 11.08,
+    "y": 5.4799999999999995,
+    "text": "U-Net bottleneck",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 11.08,
+    "y": 5.9799999999999995,
+    "text": "Pooled spatial grid: 10 \u00d7 10\nConcatenate conditioning c\u2032",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        10.32,
+        5.88
+      ],
+      [
+        10.9,
+        5.88
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        12.445,
+        4.65
+      ],
+      [
+        12.445,
+        5.3
+      ]
+    ],
+    "color": "#7050A3",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 14.57,
+    "y": 5.15,
+    "w": 2.15,
+    "h": 1.53,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 14.75,
+    "y": 5.33,
+    "text": "U-Net decoder",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 14.75,
+    "y": 5.83,
+    "text": "20 \u2192 40 \u2192 80\nSkip-feature fusion",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        13.99,
+        5.88
+      ],
+      [
+        14.57,
+        5.88
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 17.3,
+    "y": 4.8,
+    "w": 2.1,
+    "h": 1.98,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 17.48,
+    "y": 4.9799999999999995,
+    "text": "Forecast heads",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 17.48,
+    "y": 5.4799999999999995,
+    "text": "\u0394h, \u0394HU, \u0394HV\nActivity gate\nWet/dry logits",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        16.72,
+        5.88
+      ],
+      [
+        17.3,
+        5.88
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        9.0,
+        5.15
+      ],
+      [
+        9.0,
+        4.92
+      ],
+      [
+        5.8,
+        4.92
+      ],
+      [
+        5.8,
+        3.28
+      ]
+    ],
+    "color": "#7050A3",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        7.38,
+        5.73
+      ],
+      [
+        7.38,
+        4.92
+      ],
+      [
+        5.8,
+        4.92
+      ]
+    ],
+    "color": "#7050A3",
+    "dashed": false
+  },
+  {
+    "kind": "text",
+    "x": 6.02,
+    "y": 4.6,
+    "text": "tile features + boundaries",
+    "size": 10,
+    "color": "#7050A3",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        9.58,
+        5.15
+      ],
+      [
+        9.58,
+        4.82
+      ],
+      [
+        15.645,
+        4.82
+      ],
+      [
+        15.645,
+        5.15
+      ]
+    ],
+    "color": "#58707F",
+    "dashed": true
+  },
+  {
+    "kind": "text",
+    "x": 14.54,
+    "y": 4.53,
+    "text": "U-Net skip features",
+    "size": 10,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 7.66,
+    "w": 3.1,
+    "h": 1.4,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 7.84,
+    "text": "Observed hydraulic halo",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 8.34,
+    "text": "96 \u00d7 96 at t and t \u2212 1\n8-cell border around center",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 4.48,
+    "y": 7.66,
+    "w": 2.64,
+    "h": 1.4,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 4.66,
+    "y": 7.84,
+    "text": "Separate halo CNN",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 4.66,
+    "y": 8.34,
+    "text": "Encode 96 \u00d7 96\nCrop: 80 \u00d7 80 features",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.7,
+        8.33
+      ],
+      [
+        4.48,
+        8.33
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        7.12,
+        8.33
+      ],
+      [
+        7.38,
+        8.33
+      ],
+      [
+        7.38,
+        6.04
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "text",
+    "x": 8.06,
+    "y": 7.63,
+    "text": "Raster pathway stays intact.\nGraph returns a conditioning correction.\nOne direct forecast for the requested lead.",
+    "size": 13,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "box",
+    "x": 14.57,
+    "y": 7.66,
+    "w": 4.83,
+    "h": 1.4,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 14.75,
+    "y": 7.84,
+    "text": "Central forecast at t + L",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 14.75,
+    "y": 8.34,
+    "text": "Observed S(t) + gated residual change\n80 \u00d7 80 depth, signed HU/HV and wet probability",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        18.35,
+        6.78
+      ],
+      [
+        18.35,
+        7.66
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "line",
+    "points": [
+      [
+        0.57,
+        9.35
+      ],
+      [
+        19.4,
+        9.35
+      ]
+    ],
+    "color": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.55,
+    "text": "Purple: graph context branch. Learned messages are features, not hydraulic fluxes; hierarchy is separate future work.",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.95,
+    "text": "Implemented local graph prototype; corrected-data forecasting benefit remains unproven.",
+    "size": 11,
+    "color": "#58707F",
+    "bold": false
+  }
+]

@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1440pt" height="741.6pt" viewBox="0 0 1440 741.6" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-10-08T14:41:13.746404</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.7, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 741.6 
+L 1440 741.6 
+L 1440 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 48.96 144.72 
+L 329.76 144.72 
+Q 336.96 144.72 336.96 151.92 
+L 336.96 290.88 
+Q 336.96 298.08 329.76 298.08 
+L 48.96 298.08 
+Q 41.76 298.08 41.76 290.88 
+L 41.76 151.92 
+Q 41.76 144.72 48.96 144.72 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #dcf0ee; stroke: #86bebc; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 386.64 144.72 
+L 667.44 144.72 
+Q 674.64 144.72 674.64 151.92 
+L 674.64 290.88 
+Q 674.64 298.08 667.44 298.08 
+L 386.64 298.08 
+Q 379.44 298.08 379.44 290.88 
+L 379.44 151.92 
+Q 379.44 144.72 386.64 144.72 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #dcf0ee; stroke: #86bebc; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 724.32 144.72 
+L 1005.12 144.72 
+Q 1012.32 144.72 1012.32 151.92 
+L 1012.32 290.88 
+Q 1012.32 298.08 1005.12 298.08 
+L 724.32 298.08 
+Q 717.12 298.08 717.12 290.88 
+L 717.12 151.92 
+Q 717.12 144.72 724.32 144.72 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #dcf0ee; stroke: #86bebc; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 1062 144.72 
+L 1389.6 144.72 
+Q 1396.8 144.72 1396.8 151.92 
+L 1396.8 290.88 
+Q 1396.8 298.08 1389.6 298.08 
+L 1062 298.08 
+Q 1054.8 298.08 1054.8 290.88 
+L 1054.8 151.92 
+Q 1054.8 144.72 1062 144.72 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #dcf0ee; stroke: #86bebc; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 337.521665 219.6 
+Q 358.201823 219.6 376.86952 219.6 
+" clip-path="url(#p683f6f94a4)" style="fill: none; stroke: #007f83; stroke-width: 1.8; stroke-linecap: round"/>
+    <path d="M 370.06952 216.2 
+L 376.86952 219.6 
+L 370.06952 223 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #007f83; stroke: #007f83; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 675.201665 219.6 
+Q 695.881823 219.6 714.54952 219.6 
+" clip-path="url(#p683f6f94a4)" style="fill: none; stroke: #007f83; stroke-width: 1.8; stroke-linecap: round"/>
+    <path d="M 707.74952 216.2 
+L 714.54952 219.6 
+L 707.74952 223 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #007f83; stroke: #007f83; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 1012.881665 219.6 
+Q 1033.561823 219.6 1052.22952 219.6 
+" clip-path="url(#p683f6f94a4)" style="fill: none; stroke: #007f83; stroke-width: 1.8; stroke-linecap: round"/>
+    <path d="M 1045.42952 216.2 
+L 1052.22952 219.6 
+L 1045.42952 223 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #007f83; stroke: #007f83; stroke-width: 1.8; stroke-linecap: round"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 48.96 351.36 
+L 455.04 351.36 
+Q 462.24 351.36 462.24 358.56 
+L 462.24 566.64 
+Q 462.24 573.84 455.04 573.84 
+L 48.96 573.84 
+Q 41.76 573.84 41.76 566.64 
+L 41.76 358.56 
+Q 41.76 351.36 48.96 351.36 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #eef4f6; stroke: #d1e0e6; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 516.96 351.36 
+L 923.04 351.36 
+Q 930.24 351.36 930.24 358.56 
+L 930.24 566.64 
+Q 930.24 573.84 923.04 573.84 
+L 516.96 573.84 
+Q 509.76 573.84 509.76 566.64 
+L 509.76 358.56 
+Q 509.76 351.36 516.96 351.36 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #eef4f6; stroke: #d1e0e6; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 984.96 351.36 
+L 1389.6 351.36 
+Q 1396.8 351.36 1396.8 358.56 
+L 1396.8 566.64 
+Q 1396.8 573.84 1389.6 573.84 
+L 984.96 573.84 
+Q 977.76 573.84 977.76 566.64 
+L 977.76 358.56 
+Q 977.76 351.36 984.96 351.36 
+z
+" clip-path="url(#p683f6f94a4)" style="fill: #eef4f6; stroke: #d1e0e6; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 41.04 673.2 
+L 1396.8 673.2 
+" clip-path="url(#p683f6f94a4)" style="fill: none; stroke: #d1e0e6; stroke-width: 1.8; stroke-linecap: square"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 27px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #123147" x="39.6" y="45.715781" transform="rotate(-0 39.6 45.715781)">What happens in one message-passing layer?</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #58707f" x="41.04" y="79.819062" transform="rotate(-0 41.04 79.819062)">Source tile j → destination tile i  |  The same learned functions are shared across edges and nodes</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #007f83" x="56.16" y="170.517656" transform="rotate(-0 56.16 170.517656)">1  Build each edge message</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 204.997969)">m(j→i) = Mₖ([zⱼ, zᵢ, aⱼᵢ])</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 222.024617)">Use source and destination features.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 239.051266)">Edge attributes a are optional.</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #007f83" x="393.84" y="170.517656" transform="rotate(-0 393.84 170.517656)">2  Aggregate at destination</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(393.84 204.997969)">m̄ᵢ = mean of incoming messages</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(393.84 222.024617)">Average over the tile’s neighbors.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(393.84 239.051266)">Degree can vary between tiles.</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #007f83" x="731.52" y="170.517656" transform="rotate(-0 731.52 170.517656)">3  Update the destination</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(731.52 204.997969)">zᵢ ← zᵢ + Uₖ([zᵢ, m̄ᵢ])</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(731.52 222.024617)">Residual update retains local features.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(731.52 239.051266)">No incoming edges:</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(731.52 256.077914)">node stays unchanged.</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #007f83" x="1069.2" y="170.517656" transform="rotate(-0 1069.2 170.517656)">4  Repeat and condition</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(1069.2 204.997969)">Repeat for K graph layers.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(1069.2 222.024617)">c′ᵢ = cᵢ + P(zᵢᴷ − zᵢ⁰)</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(1069.2 239.051266)">Use c′ᵢ in the U-Net bottleneck.</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #123147" x="56.16" y="377.157656" transform="rotate(-0 56.16 377.157656)">Reading the symbols</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 411.637969)">zᵢ: encoded features for tile i</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 428.664617)">Mₖ: learned message MLP</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 445.691266)">Uₖ: learned update MLP</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 462.717914)">P: learned linear projection</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(56.16 479.744563)">[ , ]: concatenation; k: graph layer</text>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #123147" x="524.16" y="377.157656" transform="rotate(-0 524.16 377.157656)">Two layers = two spatial hops</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(524.16 411.637969)">Layer 1 uses adjacent-tile features.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(524.16 428.664617)">Layer 2 can carry features from two hops away.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(524.16 445.691266)">These are spatial exchanges, not forecast steps.</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(524.16 462.717914)">All nodes still share the same origin and lead.</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #123147" x="992.16" y="377.157656" transform="rotate(-0 992.16 377.157656)">How we test its value</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(992.16 411.637969)">Same U-Net and connected context batches:</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(992.16 428.664617)">• U-Net without graph messages</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(992.16 445.691266)">• Local capacity control with self edges</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(992.16 462.717914)">• Graph with actual adjacency edges</text>
+    <text style="font-size: 13px; font-family: 'DejaVu Sans'; fill: #243c4b" transform="translate(992.16 479.744563)">Match data, losses and evaluation origins.</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #243c4b" x="43.2" y="696.718125" transform="rotate(-0 43.2 696.718125)">Messages have no water-volume interpretation; physical conservation requires a separate formulation.</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #58707f" x="43.2" y="724.758281" transform="rotate(-0 43.2 724.758281)">Implemented local graph prototype; corrected-data forecasting benefit remains unproven.</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p683f6f94a4">
+   <rect x="0" y="0" width="1440" height="741.6"/>
+  </clipPath>
+ </defs>
+</svg>

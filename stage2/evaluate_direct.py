@@ -12,6 +12,8 @@ import torch
 from stage2.data import DirectHorizonDataset
 from stage2.direct import evaluate_direct_horizons
 from stage2.model import Stage2DirectLeadModel
+from stage2.graph_data import GraphNeighborhoodDataset, TileTopology
+from stage2.target_integrity import require_corrected_targets
 from triton_core.data import prepare_hydraulic_data
 from triton_core.runtime import resolve_device
 
@@ -47,6 +49,7 @@ def main():
     args = parse_args()
     run_dir = args.run_dir.resolve()
     config = json.loads((run_dir / "run_config.json").read_text())
+    require_corrected_targets(config["manifest_dir"])
     device = resolve_device(args.device)
     if args.disable_cudnn or bool(config.get("disable_cudnn", False)):
         torch.backends.cudnn.enabled = False
@@ -102,6 +105,13 @@ def main():
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
     model = Stage2DirectLeadModel(**checkpoint["model_config"]).to(device)
     model.load_state_dict(checkpoint["model_state_dict"])
+    if config.get("graph_hops", 0):
+        topology = TileTopology.from_raster(dataset.block_index_grid, dataset.block_rows["block_index"])
+        if topology.digest != config.get("graph_topology_sha256"):
+            raise ValueError("Evaluation topology differs from training")
+        if int(config["graph_hops"]) < checkpoint["model_config"].get("graph_layers", 0):
+            raise ValueError("Graph context does not cover message passing layers")
+        dataset = GraphNeighborhoodDataset(dataset, topology, int(config["graph_hops"]))
     evaluation = evaluate_direct_horizons(
         model=model,
         dataset=dataset,

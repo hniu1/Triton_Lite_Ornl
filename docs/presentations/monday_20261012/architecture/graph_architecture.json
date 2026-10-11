@@ -1,0 +1,478 @@
+[
+  {
+    "kind": "text",
+    "x": 0.55,
+    "y": 0.35,
+    "text": "Tile graph communication inside the direct U-Net",
+    "size": 27,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.57,
+    "y": 0.96,
+    "text": "V5-D prototype  |  One tile = one node; graph context conditions the raster forecast",
+    "size": 14,
+    "color": "#58707F",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 0.6,
+    "y": 2.03,
+    "w": 4.0,
+    "h": 2.47,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 2.21,
+    "text": "1  Shared tile encoder",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 2.71,
+    "text": "Terrain + observed state/history\nForcing, times and requested lead\nOptional hydraulic halo\nEncode every context tile",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 5.25,
+    "y": 2.03,
+    "w": 4.0,
+    "h": 2.47,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 5.43,
+    "y": 2.21,
+    "text": "2  Node features",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 5.43,
+    "y": 2.71,
+    "text": "Pooled 20 \u00d7 20 spatial features\nFour directional boundary summaries\nTile forcing/time/lead conditioning\nLinear node projection",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 9.9,
+    "y": 2.03,
+    "w": 3.72,
+    "h": 2.47,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 10.08,
+    "y": 2.21,
+    "text": "3  Message passing",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 10.08,
+    "y": 2.71,
+    "text": "Learn messages on tile edges\nMean incoming messages\nResidual node update\nRepeat K spatial layers",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 14.3,
+    "y": 2.03,
+    "w": 5.08,
+    "h": 2.47,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 14.48,
+    "y": 2.21,
+    "text": "4  U-Net bottleneck context",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 14.48,
+    "y": 2.71,
+    "text": "c\u2032 = c + P(z\u1d37 \u2212 z\u2070)\nConcatenate with pooled raster features\nDecoder + original skip features\nCentral depth, extent, HU/HV forecast",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        4.6,
+        3.28
+      ],
+      [
+        5.25,
+        3.28
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        9.25,
+        3.28
+      ],
+      [
+        9.9,
+        3.28
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        13.62,
+        3.28
+      ],
+      [
+        14.27,
+        3.28
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "text",
+    "x": 0.78,
+    "y": 5.0,
+    "text": "Shared-boundary tile adjacency",
+    "size": 17,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "box",
+    "x": 2.56,
+    "y": 5.82,
+    "w": 1.23,
+    "h": 0.64,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 2.74,
+    "y": 6.0,
+    "text": "North",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "box",
+    "x": 0.81,
+    "y": 7.13,
+    "w": 1.23,
+    "h": 0.64,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 0.99,
+    "y": 7.31,
+    "text": "West",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "box",
+    "x": 4.31,
+    "y": 7.13,
+    "w": 1.23,
+    "h": 0.64,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 4.489999999999999,
+    "y": 7.31,
+    "text": "East",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "box",
+    "x": 2.56,
+    "y": 8.44,
+    "w": 1.23,
+    "h": 0.64,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 2.74,
+    "y": 8.62,
+    "text": "South",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "box",
+    "x": 2.56,
+    "y": 7.13,
+    "w": 1.23,
+    "h": 0.64,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 2.74,
+    "y": 7.31,
+    "text": "Center",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        2.95,
+        6.46
+      ],
+      [
+        2.95,
+        7.13
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        2.95,
+        7.77
+      ],
+      [
+        2.95,
+        8.44
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.38,
+        7.13
+      ],
+      [
+        3.38,
+        6.46
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.38,
+        8.44
+      ],
+      [
+        3.38,
+        7.77
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        2.04,
+        7.32
+      ],
+      [
+        2.56,
+        7.32
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        3.79,
+        7.32
+      ],
+      [
+        4.31,
+        7.32
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        2.56,
+        7.57
+      ],
+      [
+        2.04,
+        7.57
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "arrow",
+    "points": [
+      [
+        4.31,
+        7.57
+      ],
+      [
+        3.79,
+        7.57
+      ]
+    ],
+    "color": "#007F83",
+    "dashed": false
+  },
+  {
+    "kind": "box",
+    "x": 7.06,
+    "y": 5.23,
+    "w": 5.68,
+    "h": 3.2,
+    "fill": "#DCF0EE",
+    "edge": "#86BEBC"
+  },
+  {
+    "kind": "text",
+    "x": 7.239999999999999,
+    "y": 5.41,
+    "text": "Graph sampling contract",
+    "size": 15,
+    "color": "#007F83",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 7.239999999999999,
+    "y": 5.91,
+    "text": "Connected tiles share one event, origin and lead.\nExpand context to cover the graph layers.\nUse observed inputs; score designated centers.\nLocal communication does not cover the entire basin.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "box",
+    "x": 13.33,
+    "y": 5.23,
+    "w": 6.05,
+    "h": 3.2,
+    "fill": "#EEF4F6",
+    "edge": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 13.51,
+    "y": 5.41,
+    "text": "What the graph adds",
+    "size": 15,
+    "color": "#123147",
+    "bold": true
+  },
+  {
+    "kind": "text",
+    "x": 13.51,
+    "y": 5.91,
+    "text": "Halo: nearby pixel-level hydraulic context.\nGraph: learned tile-to-tile feature communication.\nZero-initialized projection starts with no added context.\nHUC12 hierarchy remains a proposed extension.",
+    "size": 13,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "line",
+    "points": [
+      [
+        0.57,
+        9.35
+      ],
+      [
+        19.4,
+        9.35
+      ]
+    ],
+    "color": "#D1E0E6"
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.55,
+    "text": "Edges encode geometric contact. Learned messages are features, not conserved water fluxes.",
+    "size": 12,
+    "color": "#243C4B",
+    "bold": false
+  },
+  {
+    "kind": "text",
+    "x": 0.6,
+    "y": 9.95,
+    "text": "Implemented local graph prototype; corrected-data forecasting benefit remains unproven.",
+    "size": 11,
+    "color": "#58707F",
+    "bold": false
+  }
+]

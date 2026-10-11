@@ -4,6 +4,7 @@
 import argparse
 import glob
 import logging
+import re
 import tempfile
 import zipfile
 from datetime import datetime, timedelta
@@ -83,15 +84,28 @@ def unzip_selected_multi(zip_path: Path, output_path: Path, output_types: Sequen
             LOGGER.info("Extracted %d %s*.dat files from %s", len(selected), output_type, zip_path)
 
 
+def output_step(path: Path) -> int:
+    """TRITON output counters are integers, not lexicographic timestamps."""
+    match = re.fullmatch(r"[HUV]_(\d+)_(\d+)\.dat", Path(path).name)
+    if match is None:
+        raise ValueError(f"Unrecognized TRITON output filename: {path}")
+    return int(match.group(1))
+
+
 def get_output_files(dat_path: Path, output_type: str) -> List[Path]:
     files = sorted(
-        Path(p) for p in glob.glob(str(dat_path / "*" / "output" / "flood2d" / "bin" / f"{output_type}_*.dat"))
+        (Path(p) for p in glob.glob(str(dat_path / "*" / "output" / "flood2d" / "bin" / f"{output_type}_*.dat"))),
+        key=output_step,
     )
+    steps = [output_step(path) for path in files]
+    if steps and steps != list(range(1, len(steps) + 1)):
+        raise ValueError(f"Missing/duplicate/nonsequential {output_type} output counters")
     LOGGER.info("Found %d binary output files for type %s", len(files), output_type)
     return files
 
 
-def bin2array(bin_file: Path, rows: int, cols: int, threshold: float, pad: int) -> np.ndarray:
+def bin2array(bin_file: Path, rows: int, cols: int, threshold: float, pad: int,
+              preserve_signed: bool = False) -> np.ndarray:
     full_rows = rows + 2 * pad
     full_cols = cols + 2 * pad
     expected_cells = full_rows * full_cols
@@ -110,7 +124,10 @@ def bin2array(bin_file: Path, rows: int, cols: int, threshold: float, pad: int) 
     array = np.fromfile(bin_file, dtype=dtype)
     array = array.reshape((full_rows, full_cols)).astype(np.float32, copy=False)
     array = array[pad : rows + pad, pad : cols + pad]
-    array = np.where(array > threshold, array, np.nan)
+    if preserve_signed:
+        array = np.where(np.isfinite(array) & (array != -9999.0), array, np.nan)
+    else:
+        array = np.where(array > threshold, array, np.nan)
     return array
 
 
@@ -182,6 +199,7 @@ def create_netcdf(
     crs_wkt: str,
     compression_level: int,
     sync_every: int,
+    array_reader=None,
 ) -> None:
     """Write all output types (H, U, V, ...) into one netCDF file.
 
@@ -196,6 +214,10 @@ def create_netcdf(
 
     with nc4.Dataset(output_path, "w", format="NETCDF4", diskless=False) as nc:
         nc.Conventions = "CF-1.6"
+        nc.triton_conversion_version = "numeric-order-signed-components-v1"
+        nc.triton_output_order = "numeric output counter"
+        nc.triton_signed_components_preserved = "true"
+        nc.triton_conversion_complete = "false"
         nc.createDimension("x", cols)
         nc.createDimension("y", rows)
         nc.createDimension("nv", 2)
@@ -235,6 +257,10 @@ def create_netcdf(
             bound_width_hr=0.25,
         )
 
+        counter = nc.createVariable("source_output_counter", "i4", ("out_time",))
+        counter[:] = np.arange(1, n_out_steps + 1)
+        counter.long_name = "Numeric TRITON snapshot counter in source archive"
+        reader = array_reader or bin2array
         for output_type, output_files in output_files_by_type.items():
             meta = OUTPUT_TYPE_META.get(output_type, {
                 "varname": f"output_{output_type.lower()}",
@@ -266,7 +292,10 @@ def create_netcdf(
                 )
 
             for i, output_file in enumerate(output_files):
-                arr = bin2array(output_file, rows=rows, cols=cols, threshold=threshold, pad=pad)
+                if output_step(output_file) != i + 1:
+                    raise ValueError("Source outputs must be numerically ordered from counter 1")
+                arr = reader(output_file, rows=rows, cols=cols, threshold=threshold, pad=pad,
+                                preserve_signed=output_type in {"U", "V"})
                 arr[np.isnan(arr)] = -9999.0
                 nc_var[i, :, :] = arr
                 if (i + 1) % 50 == 0 or (i + 1) == n_out_steps:
@@ -277,6 +306,7 @@ def create_netcdf(
                 if sync_every > 0 and (i + 1) % sync_every == 0:
                     nc.sync()
 
+        nc.triton_conversion_complete = "true"
         if sync_every > 0:
             nc.sync()
 

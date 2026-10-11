@@ -11,3 +11,5 @@ shapefiles/MOM_raster_*
 slurm_output/
 __pycache__/
 processed_data_depth_velocity/
+
+core.20

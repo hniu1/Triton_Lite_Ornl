@@ -14,7 +14,6 @@ from typing import Dict, List
 
 import netCDF4 as nc4
 import numpy as np
-import pandas as pd
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,6 +82,16 @@ def inspect_file(
         deltas = np.diff(time_values)
         if not np.allclose(deltas, deltas[0], rtol=1e-5, atol=1e-7):
             raise ValueError(f"Output timestamps are not uniformly spaced in {path}")
+        version = str(getattr(ds, "triton_conversion_version", "legacy_unverified"))
+        if version == "numeric-order-signed-components-v1":
+            if getattr(ds, "triton_conversion_complete", "false") != "true":
+                raise ValueError(f"Corrected conversion is incomplete: {path}")
+            if "source_output_counter" not in ds.variables or not np.array_equal(
+                ds.variables["source_output_counter"][:], np.arange(1, len(time_values) + 1)
+            ):
+                raise ValueError(f"Missing/invalid numeric source counters: {path}")
+            if getattr(ds, "triton_signed_components_preserved", "false") != "true":
+                raise ValueError(f"Signed components not certified: {path}")
 
         return {
             "event_id": event_id,
@@ -98,10 +107,13 @@ def inspect_file(
             "depth_units": str(getattr(depth, "units", "")),
             "component_x_units": str(getattr(component_x, "units", "")),
             "component_y_units": str(getattr(component_y, "units", "")),
+            "conversion_version": version,
         }
 
 
 def main() -> None:
+    import pandas as pd
+
     args = parse_args()
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -178,6 +190,11 @@ def main() -> None:
     manifest.to_parquet(output_dir / "dynamic_manifest.parquet", index=False)
     metadata = {
         "format_version": 1,
+        "conversion_version": (
+            "numeric-order-signed-components-v1"
+            if all(record.get("conversion_version") == "numeric-order-signed-components-v1"
+                   for record in records) and records else "legacy_or_mixed_unverified"
+        ),
         "variable_names": variable_names,
         "component_semantics": args.component_semantics,
         "grid_shape": list(expected_grid_shape),

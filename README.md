@@ -1,5 +1,11 @@
 # Triton Lite Flood Forecasting
 
+> **Critical status, 6 October 2026:** confirmed chronology and signed-discharge
+> conversion defects affect legacy training/evaluation assets. Existing V4/V5
+> scores are not validated forecasting performance. New V5 runs reject legacy
+> targets; data repair and baseline reruns take priority over graph scaling.
+> Read [TARGET_DATA_AUDIT.md](docs/stage2/TARGET_DATA_AUDIT.md).
+
 This repository is now organized around **Stage 2 V5**, a state-aware flood
 forecasting system for direct 0.5-to-24-hour prediction of 10 m depth, flood
 extent, and flow fields over the Conasauga simulation domain.
@@ -14,6 +20,8 @@ For the leadership meeting, use
 [LEADERSHIP_BRIEFING.md](docs/stage2/LEADERSHIP_BRIEFING.md), including completed
 five-fold results and V5-B–F decision gates. Current compute execution is on
 [OLCF Riker](docs/stage2/RIKER_EXECUTION.md) with the existing Python environment.
+The staged graph extension is documented in
+[V5-D graph communication](docs/stage2/V5D_GRAPH_COMMUNICATION.md).
 
 ## Active model
 
@@ -43,7 +51,7 @@ and five-fold event evaluation; the halo architecture is the depth candidate.
 | V5-A direct lead model | Complete | Training, checkpoint selection, and dense 1–48-step evaluation |
 | V5-B input halos | Evaluation complete | Depth improves 11.8% over persistence across five folds; full-context halo and capacity controls remain |
 | V5-C block-specific forcing | Initial test complete | Inverse-distance signal tested with coupling; clean hydrologic forcing ablation remains |
-| V5-D multiscale graph | Not implemented | Planned tile and HUC12 message passing |
+| V5-D multiscale graph | Local graph smoke complete; learning diagnostics reviewed | Depth/extent fit on tiny training cohort, velocity gate failed; larger comparison held, hierarchy remains |
 | V5-E conservation/coupling | Partial tests complete | Auxiliary losses and component gate did not resolve velocity; conservative formulation remains |
 | V5-F Transformer/operator | Not implemented | Deferred controlled backbone comparison |
 

@@ -35,6 +35,8 @@ def main():
         "flow_weight_fraction",
     )
     optional_invariant_keys = (
+        "conversion_version",
+        "source_manifest_sha256",
         "deep_min_wet_fraction",
         "deep_depth_statistic",
     )

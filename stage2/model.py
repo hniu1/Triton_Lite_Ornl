@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from triton_core.model import CausalEventEncoder, ConvBlock
+from stage2.graph import TileGraphCommunication
 
 
 class Stage2DirectLeadModel(nn.Module):
@@ -37,6 +38,9 @@ class Stage2DirectLeadModel(nn.Module):
         local_forcing_embedding_dim: int = 0,
         use_component_correction_gate: bool = False,
         component_gate_initial_bias: float = -3.0,
+        graph_layers: int = 0,
+        graph_edge_features: int = 0,
+        graph_mode: str = "neighbors",
     ) -> None:
         super().__init__()
         if history_states not in (1, 2):
@@ -51,6 +55,13 @@ class Stage2DirectLeadModel(nn.Module):
         self.hydraulic_halo_cells = int(hydraulic_halo_cells)
         self.local_forcing_embedding_dim = int(local_forcing_embedding_dim)
         self.use_component_correction_gate = bool(use_component_correction_gate)
+        if graph_layers < 0:
+            raise ValueError("graph_layers cannot be negative")
+        if graph_mode not in ("neighbors", "self"):
+            raise ValueError("graph_mode must be neighbors or self")
+        if graph_mode == "self" and graph_edge_features:
+            raise ValueError("Local-only control does not support edge attributes")
+        self.graph_mode = graph_mode
 
         self.event_encoder = CausalEventEncoder(
             event_features,
@@ -120,6 +131,21 @@ class Stage2DirectLeadModel(nn.Module):
         )
         self.enc2 = ConvBlock(base_channels, base_channels * 2)
         self.enc3 = ConvBlock(base_channels * 2, base_channels * 4)
+        self.graph_node_encoder = (
+            nn.Linear(base_channels * 8 + conditioning_dim, conditioning_dim)
+            if graph_layers > 0 else None
+        )
+        self.graph_communication = (
+            TileGraphCommunication(conditioning_dim, graph_edge_features, graph_layers)
+            if graph_layers > 0 else None
+        )
+        self.graph_projection = (
+            nn.Linear(conditioning_dim, conditioning_dim, bias=False)
+            if graph_layers > 0 else None
+        )
+        if self.graph_projection is not None:
+            # Warm-start as the unchanged direct model, then learn graph use.
+            nn.init.zeros_(self.graph_projection.weight)
         self.bottleneck = ConvBlock(
             base_channels * 4 + conditioning_dim, base_channels * 8
         )
@@ -182,6 +208,9 @@ class Stage2DirectLeadModel(nn.Module):
         forcing_weights=None,
         hydraulic_context=None,
         older_hydraulic_context=None,
+        graph_edge_index=None,
+        graph_group_ids=None,
+        graph_edge_attributes=None,
     ):
         # Evaluating the causal encoder at target_time_index intentionally
         # admits forcing known through the requested valid time, never beyond.
@@ -251,6 +280,34 @@ class Stage2DirectLeadModel(nn.Module):
             x1 = x1 + halo_features[:, :, h:-h, h:-h]
         x2 = self.enc2(F.avg_pool2d(x1, 2))
         x3 = self.enc3(F.avg_pool2d(x2, 2))
+        if self.graph_communication is not None:
+            if graph_edge_index is None or graph_group_ids is None:
+                raise ValueError("Graph model requires edges and synchronized group IDs")
+            boundaries = torch.cat([
+                x1[:, :, 0, :].mean(-1), x1[:, :, -1, :].mean(-1),
+                x1[:, :, :, 0].mean(-1), x1[:, :, :, -1].mean(-1),
+            ], dim=1)
+            nodes = self.graph_node_encoder(torch.cat([
+                x3.mean(dim=(-2, -1)), boundaries, condition,
+            ], dim=1))
+            communication_edges = graph_edge_index
+            if self.graph_mode == "self":
+                node_ids = torch.arange(nodes.shape[0], device=nodes.device)
+                communication_edges = torch.stack([node_ids, node_ids])
+            context = self.graph_communication(
+                nodes, communication_edges, graph_group_ids, graph_edge_attributes
+            )
+            source, destination = graph_edge_index
+            # Graph validation precedes indexing; also reject inconsistent
+            # forecast times even when callers accidentally reuse a group ID.
+            for values in (target_time_index, origin_time_features, lead_features):
+                if not torch.equal(values[source], values[destination]):
+                    raise ValueError("Connected tiles must share origin, target and lead")
+            condition = condition + self.graph_projection(context - nodes)
+        elif any(value is not None for value in (
+            graph_edge_index, graph_group_ids, graph_edge_attributes
+        )):
+            raise ValueError("Graph inputs supplied to a graph-disabled model")
         pooled = F.avg_pool2d(x3, 2)
         condition_map = condition[:, :, None, None].expand(
             -1, -1, pooled.shape[2], pooled.shape[3]

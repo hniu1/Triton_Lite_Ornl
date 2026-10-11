@@ -10,11 +10,14 @@ import torch
 from torch.utils.data import default_collate
 
 from stage2.losses import delta_aware_loss_terms
+from stage2.graph_data import select_center_forecasts
 from triton_core.metrics import MetricAccumulator
 from triton_core.runtime import physical_score
 
 
 DEVICE_FIELDS = (
+    "graph_edge_index", "graph_group_ids", "graph_edge_attributes",
+    "graph_center_mask", "graph_block_positions", "graph_context_truncated",
     "event",
     "time_index",
     "time_features",
@@ -91,6 +94,7 @@ def move_direct_batch(batch, device):
 
 
 def predict_direct(model, batch):
+    graph_enabled = getattr(model, "graph_communication", None) is not None
     return model(
         batch["event"],
         batch["time_index"],
@@ -110,6 +114,9 @@ def predict_direct(model, batch):
         forcing_weights=batch.get("forcing_weights"),
         hydraulic_context=batch.get("hydraulic_context"),
         older_hydraulic_context=batch.get("older_hydraulic_context"),
+        graph_edge_index=batch.get("graph_edge_index") if graph_enabled else None,
+        graph_group_ids=batch.get("graph_group_ids") if graph_enabled else None,
+        graph_edge_attributes=batch.get("graph_edge_attributes") if graph_enabled else None,
     )
 
 
@@ -158,6 +165,7 @@ def run_direct_train_epoch(model, loader, device, loss_args, optimizer):
         batch = move_direct_batch(batch, device)
         optimizer.zero_grad(set_to_none=True)
         output = predict_direct(model, batch)
+        output, batch = select_center_forecasts(output, batch)
         values = delta_aware_loss_terms(output, batch, loss_args, device)
         values["loss"].backward()
         gradient_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -249,21 +257,15 @@ def evaluate_direct_horizons(
         for event_position, origin_time, block_positions in selected:
             for horizon in horizons:
                 target_time = int(origin_time) + int(horizon)
-                batch = default_collate(
-                    [
-                        dataset[
-                            (
-                                event_position,
-                                target_time,
-                                block_position,
-                                horizon,
-                            )
-                        ]
-                        for block_position in block_positions
-                    ]
-                )
+                keys = [(event_position, target_time, block_position, horizon)
+                        for block_position in block_positions]
+                if hasattr(dataset, "make_batch"):
+                    batch = dataset.make_batch(keys)
+                else:
+                    batch = default_collate([dataset[key] for key in keys])
                 batch = move_direct_batch(batch, device)
                 output = predict_direct(model, batch)
+                output, batch = select_center_forecasts(output, batch)
                 component_x, component_y = apply_component_policy(
                     output, batch, component_policy, wet_threshold
                 )

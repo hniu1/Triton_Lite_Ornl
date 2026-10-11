@@ -11,7 +11,9 @@ conda activate /lustre/orion/cli138/proj-shared/7hn/envs/triton_andes
 
 Despite its historical name, this environment imports PyTorch 2.5.1 with a
 CUDA 11.8 build, NumPy, pandas, netCDF4, and Matplotlib on Riker's login host.
-GPU execution must be checked on an allocated compute node.
+Allocated-node GPU execution was verified by job `186107` on `riker-gpu3`:
+NVIDIA L40S, GPU forward/backward passed, all 23 regression tests passed,
+and Slurm reported `COMPLETED` with exit code `0:0`.
 
 Riker's Slurm `gpu` partition has eight GPU nodes, each advertising two NVIDIA
 L40S GPUs. `batch` is the default CPU partition; `test` is also available.
@@ -30,10 +32,13 @@ sbatch workflows/stage2/14_riker_environment_smoke.sh
 
 It prints GPU/driver details, executes GPU forward/backward, and runs active
 regression tests. Successful execution establishes environment compatibility;
-it does not establish training throughput. It has not yet been submitted.
+it does not establish training throughput. Submitted as job `186107` on
+5 October 2026. The graph pipeline smoke is job `186108`, dependent on its
+success; see [graph execution details](V5D_GRAPH_COMMUNICATION.md).
 `sbatch --test-only` accepted the corrected request on 5 October 2026; this
-validates submission eligibility, not actual GPU runtime compatibility.
-All 13 active regression tests passed on the login host. Its CUDA stub-driver
+validates submission eligibility; the completed preflight subsequently verified
+actual GPU runtime compatibility.
+All 23 active regression tests passed on the login host. Its CUDA stub-driver
 warning is another reason to verify CUDA on an allocated GPU node.
 
 Before new training, benchmark the unchanged V5-B checkpoint on a small frozen

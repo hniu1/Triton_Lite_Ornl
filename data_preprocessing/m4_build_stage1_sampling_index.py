@@ -10,6 +10,7 @@ about dynamic labels without exhaustively scanning every event/time/block.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -311,6 +312,9 @@ def main():
     )
     summary.to_csv(output_dir / "sampling_summary.csv", index=False)
     payload: Dict[str, object] = {
+        "conversion_version": metadata.get("conversion_version", "legacy_unverified"),
+        "source_manifest_sha256": hashlib.sha256(
+            (manifest_dir / "dynamic_manifest.parquet").read_bytes()).hexdigest(),
         "format_version": 1,
         "sampling_strategy": "label_aware_anchor_candidate_pool",
         "n_candidates": int(len(frame)),

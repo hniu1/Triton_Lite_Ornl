@@ -49,7 +49,7 @@ def main():
                          "persistence_fold_mean": persistence[:, index].mean()})
     axes[-1].set_xlabel("Forecast lead (hours)")
     axes[-1].set_xticks([0.5, 3, 6, 12, 18, 24])
-    figure.suptitle("V5-B: performance by forecast lead\n40 events; five folds; known forcing; sampled evaluation", fontsize=13)
+    figure.suptitle("V5-B legacy-target metrics: NOT validated forecasts\nKnown chronology/sign defects; preserved historical results", fontsize=13)
     figure.tight_layout()
     figure.savefig(destination / "v5b_forecast_horizons.png", dpi=180)
     figure.savefig(destination / "v5b_forecast_horizons.pdf")
