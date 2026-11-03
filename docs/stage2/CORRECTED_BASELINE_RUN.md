@@ -116,7 +116,9 @@ RMSE. The evaluation console prints depth and F1 only; read the JSON for velocit
 The proposed next diagnostic is documented in
 [dynamic-flood evaluation on stream tiles](STREAM_FLOOD_EVALUATION.md). The
 user requested substantial event/time and local depth/velocity changes;
-selection criteria are under discussion and no new jobs are submitted.
+target-time selection criteria are under discussion. Training/validation data
+characterization jobs 188883–188884 completed successfully; no model evaluations are
+submitted for this diagnostic.
 
 On 9 October 2026 the user authorized training both context variants and
 comparing them with the corrected baseline. Each starts from random weights,
@@ -225,3 +227,5 @@ Inspect the matching `.err` files too; Python logging uses stderr. For Monday's
 slides, report verified data repair, the frozen experiment, and newly obtained
 evaluation evidence. Claim forecasting improvement only if corrected held-out
 results support it; do not carry forward legacy performance claims.
+
+Latest experiment: [B — fixed 5-hour localized Halo, depth and extent only](FIXED5H_LOCAL_DEPTH_EXTENT.md).

@@ -25,6 +25,7 @@ from stage2.graph_data import GraphNeighborhoodDataset, TileTopology
 from stage2.target_integrity import require_corrected_targets, require_corrected_sampling
 from triton_core.data import prepare_hydraulic_data
 from triton_core.runtime import resolve_device
+from stage2.prepare_dynamic_stream import digest_file
 
 
 def parse_args():
@@ -52,6 +53,12 @@ def parse_args():
     parser.add_argument("--component-gate-initial-bias", type=float, default=-3.0)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--max-horizon-steps", type=int, default=48)
+    parser.add_argument("--train-horizons",type=int,nargs="+",default=None)
+    parser.add_argument("--balanced-train-horizons",action="store_true")
+    parser.add_argument("--depth-extent-only",action="store_true")
+    parser.add_argument("--deep-rising-loss-weight",type=float,default=0.0)
+    parser.add_argument("--deep-rising-depth-threshold",type=float,default=1.0)
+    parser.add_argument("--deep-rising-change-threshold",type=float,default=0.1)
     parser.add_argument("--step-hours", type=float, default=0.5)
     parser.add_argument("--epochs", type=int, default=8)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -151,6 +158,11 @@ def build_bundle(base_config, args, sampling_index_dir):
 
 def main():
     args = parse_args()
+    if (not all(np.isfinite(v) for v in (args.deep_rising_loss_weight,
+            args.deep_rising_depth_threshold,args.deep_rising_change_threshold))
+            or args.deep_rising_loss_weight < 0 or args.deep_rising_depth_threshold <= 0
+            or args.deep_rising_change_threshold <= 0):
+        raise ValueError('Deep-rising loss requires a nonnegative weight and positive finite thresholds')
     if args.max_horizon_steps < 1 or args.step_hours <= 0:
         raise ValueError("Forecast horizon and timestep must be positive")
     if args.graph_layers < 0:
@@ -179,6 +191,14 @@ def main():
         else Path(base_config["sampling_index_dir"]).resolve()
     )
     require_corrected_sampling(sampling_index_dir, base_config["manifest_dir"])
+    if bool(args.forcing_weights_path) != bool(args.local_forcing_embedding_dim):
+        raise ValueError('Local forcing requires both a weight file and a positive embedding size')
+    weights_sha256=digest_file(args.forcing_weights_path) if args.forcing_weights_path else None
+    if args.forcing_weights_path:
+        metadata_path=args.forcing_weights_path.parent/'metadata.json'
+        metadata=json.loads(metadata_path.read_text())
+        if metadata.get('weights_sha256',weights_sha256)!=weights_sha256:
+            raise ValueError('Forcing weights differ from their audited metadata')
     bundle = build_bundle(base_config, args, sampling_index_dir)
     history_states = 2
     direct_datasets = {
@@ -192,9 +212,13 @@ def main():
         )
         for name in ("train", "val", "test")
     }
-    horizons = list(range(1, args.max_horizon_steps + 1))
+    horizons = sorted(set(args.train_horizons or range(1, args.max_horizon_steps + 1)))
+    if not horizons or horizons[0]<1 or horizons[-1]>args.max_horizon_steps:
+        raise ValueError("Training horizons outside configured range")
+    if not set(args.selection_horizons).issubset(horizons):
+        raise ValueError("Selection horizons must be trained")
     train_sampler = RandomLeadTimeBatchSampler(
-        bundle.train_sampler, horizons=horizons, seed=args.seed
+        bundle.train_sampler, horizons=horizons, seed=args.seed,balanced=args.balanced_train_horizons
     )
     topology = None
     if graph_hops:
@@ -262,6 +286,9 @@ def main():
         f"adapted={adapted} skipped={skipped}",
         flush=True,
     )
+    if args.depth_extent_only:
+        for parameter in model.component_delta_head.parameters():
+            parameter.requires_grad_(False)
     optimizer = build_optimizer(
         model,
         args.backbone_learning_rate,
@@ -269,11 +296,22 @@ def main():
         args.weight_decay,
     )
     loss_args = Namespace(**base_config)
+    loss_args.depth_extent_only = args.depth_extent_only
+    loss_args.deep_rising_loss_weight=args.deep_rising_loss_weight
+    loss_args.deep_rising_depth_threshold=args.deep_rising_depth_threshold
+    loss_args.deep_rising_change_threshold=args.deep_rising_change_threshold
+    if args.depth_extent_only:
+        for key in ("component_loss_weight","dry_component_loss_weight","component_delta_loss_weight",
+                    "derived_velocity_loss_weight","velocity_direction_loss_weight","boundary_flux_loss_weight"):
+            setattr(loss_args,key,0.0)
     loss_args.component_semantics = bundle.component_semantics
     loss_args.velocity_direction_loss_weight = args.velocity_direction_loss_weight
     loss_args.boundary_flux_loss_weight = args.boundary_flux_loss_weight
     loss_args.moving_velocity_threshold = args.moving_velocity_threshold
 
+    if args.depth_extent_only:
+        loss_args.velocity_direction_loss_weight=0.0
+        loss_args.boundary_flux_loss_weight=0.0
     output_dir = args.output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     np.savez(output_dir / "normalization.npz", **vars(bundle.normalization))
@@ -281,6 +319,10 @@ def main():
         (output_dir / "graph_topology.json").write_text(json.dumps(topology.metadata(), indent=2))
     run_config = {
         "training_mode": "stage2_v5_direct_lead_tile",
+        "depth_extent_only": args.depth_extent_only,
+        "trained_outputs": ["depth", "wet_extent"] if args.depth_extent_only else ["depth","wet_extent","unit_discharge"],
+        "component_output_policy": "unused_zero_correction_placeholder" if args.depth_extent_only else "learned",
+        "selection_metric": "wet_depth_rmse + 0.5*(1-wet_f1)" if args.depth_extent_only else "physical_score + weighted_velocity_rmse",
         "forecast_mode": "direct_origin_to_target",
         "forcing_availability": "known_through_target_time",
         "intermediate_hydraulic_states_used": False,
@@ -295,6 +337,7 @@ def main():
             if args.forcing_weights_path is not None
             else None
         ),
+        "forcing_weights_sha256": weights_sha256,
         "initial_run_dir": str(initial_run_dir),
         "initial_checkpoint": (None if args.no_v4b_initialization
                                else str(initial_checkpoint_path.resolve())),
@@ -305,6 +348,7 @@ def main():
         "max_horizon_steps": args.max_horizon_steps,
         "step_hours": args.step_hours,
         "trained_horizons_steps": horizons,
+        "balanced_train_horizons": args.balanced_train_horizons,
         "selection_horizons_steps": sorted(set(args.selection_horizons)),
         "selection_batches": args.selection_batches,
         "selection_start_time_stride": args.selection_start_time_stride,
@@ -351,7 +395,7 @@ def main():
         },
         "loss_config": {
             key: value
-            for key, value in base_config.items()
+            for key, value in vars(loss_args).items()
             if "loss" in key
             or key
             in {
@@ -361,11 +405,16 @@ def main():
                 "stable_extent_threshold",
                 "rapid_depth_threshold",
                 "rapid_extent_threshold",
+                "deep_rising_depth_threshold",
+                "deep_rising_change_threshold",
+                "depth_weight_shallow", "depth_weight_moderate",
+                "depth_weight_deep", "depth_weight_extreme",
+                "depth_moderate_threshold", "depth_deep_threshold", "depth_extreme_threshold",
             }
         },
     }
-    run_config["velocity_direction_loss_weight"] = args.velocity_direction_loss_weight
-    run_config["boundary_flux_loss_weight"] = args.boundary_flux_loss_weight
+    run_config["velocity_direction_loss_weight"] = loss_args.velocity_direction_loss_weight
+    run_config["boundary_flux_loss_weight"] = loss_args.boundary_flux_loss_weight
     run_config["moving_velocity_threshold"] = args.moving_velocity_threshold
     (output_dir / "run_config.json").write_text(json.dumps(run_config, indent=2))
 
@@ -389,9 +438,10 @@ def main():
             start_time_stride=args.selection_start_time_stride,
             wet_threshold=float(base_config["wet_threshold"]),
             component_semantics=bundle.component_semantics,
+            depth_extent_only=args.depth_extent_only,
         )
         selection_score = horizon_selection_score(
-            validation, args.selection_derived_velocity_weight
+            validation, args.selection_derived_velocity_weight, depth_extent_only=args.depth_extent_only
         )
         record = {
             "epoch": epoch,
@@ -444,6 +494,7 @@ def main():
             start_time_stride=args.selection_start_time_stride,
             wet_threshold=float(base_config["wet_threshold"]),
             component_semantics=bundle.component_semantics,
+            depth_extent_only=args.depth_extent_only,
         )
     payload = {
         "best_epoch": best_epoch,

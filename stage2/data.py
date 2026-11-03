@@ -149,6 +149,7 @@ class RandomLeadTimeBatchSampler(Sampler[List[DirectForecastKey]]):
         base_sampler: Sampler,
         horizons: Sequence[int],
         seed: int,
+        balanced: bool = False,
     ) -> None:
         clean = sorted(set(int(value) for value in horizons))
         if not clean or clean[0] < 1:
@@ -156,6 +157,7 @@ class RandomLeadTimeBatchSampler(Sampler[List[DirectForecastKey]]):
         self.base_sampler = base_sampler
         self.horizons = clean
         self.seed = int(seed)
+        self.balanced = bool(balanced)
         self.epoch = 0
 
     def __len__(self) -> int:
@@ -168,10 +170,16 @@ class RandomLeadTimeBatchSampler(Sampler[List[DirectForecastKey]]):
 
     def __iter__(self) -> Iterator[List[DirectForecastKey]]:
         rng = np.random.default_rng(self.seed + 1000003 * self.epoch)
+        deck = []
         for batch in self.base_sampler:
             if not batch:
                 continue
-            lead = int(rng.choice(self.horizons))
+            if self.balanced:
+                if not deck:
+                    deck = rng.permutation(self.horizons).tolist()
+                lead = int(deck.pop())
+            else:
+                lead = int(rng.choice(self.horizons))
             yield [
                 (int(event), int(target), int(block), lead)
                 for event, target, block in batch

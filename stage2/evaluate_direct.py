@@ -42,6 +42,8 @@ def parse_args():
         default="learned",
     )
     parser.add_argument("--per-event", action="store_true")
+    parser.add_argument("--depth-diagnostics",action="store_true")
+    parser.add_argument("--cohort", type=Path)
     return parser.parse_args()
 
 
@@ -50,6 +52,10 @@ def main():
     run_dir = args.run_dir.resolve()
     config = json.loads((run_dir / "run_config.json").read_text())
     require_corrected_targets(config["manifest_dir"])
+    if config.get('forcing_weights_sha256'):
+        from stage2.prepare_dynamic_stream import digest_file
+        if digest_file(config['forcing_weights_path']) != config['forcing_weights_sha256']:
+            raise ValueError('Forcing weights changed since training')
     device = resolve_device(args.device)
     if args.disable_cudnn or bool(config.get("disable_cudnn", False)):
         torch.backends.cudnn.enabled = False
@@ -112,6 +118,12 @@ def main():
         if int(config["graph_hops"]) < checkpoint["model_config"].get("graph_layers", 0):
             raise ValueError("Graph context does not cover message passing layers")
         dataset = GraphNeighborhoodDataset(dataset, topology, int(config["graph_hops"]))
+    target_batches, cohort = None, None
+    if args.cohort is not None:
+        from stage2.dynamic_stream_cohort import load_batches, digest_file
+        if args.output_path is None or args.split != "test":
+            raise ValueError("Conditional evaluation requires a separate output path and test split")
+        target_batches, cohort = load_batches(args.cohort, dataset, horizons, args.batch_size)
     evaluation = evaluate_direct_horizons(
         model=model,
         dataset=dataset,
@@ -126,6 +138,10 @@ def main():
         wet_classification_mode=extent_mode,
         component_policy=args.component_policy,
         return_per_event=args.per_event,
+        depth_extent_only=bool(config.get("depth_extent_only",False)),
+        depth_diagnostics=args.depth_diagnostics,
+        target_batches=target_batches,
+        allow_partial_target_history=bool(cohort and cohort["rule"].get("lead_eligibility") == "available_origin_history"),
     )
     if args.per_event:
         metrics, cohort_batches, per_event_metrics = evaluation
@@ -134,6 +150,8 @@ def main():
         per_event_metrics = None
     payload = {
         "checkpoint": str(checkpoint_path.resolve()),
+        "trained_outputs": config.get("trained_outputs",["depth","wet_extent","unit_discharge"]),
+        "depth_extent_only": bool(config.get("depth_extent_only",False)),
         "checkpoint_epoch": checkpoint.get("epoch"),
         "split": args.split,
         "split_events": config["split_events"][args.split],
@@ -150,6 +168,10 @@ def main():
         "component_policy": args.component_policy,
         "metrics": metrics,
     }
+    if cohort is not None:
+        payload.update(cohort_type="dynamic_stream_flood_eval", cohort_sha256=digest_file(args.cohort),
+                       cohort_path=str(args.cohort.resolve()), selection_rule=cohort["rule"],
+                       coverage=cohort["coverage"], target_first=True)
     if per_event_metrics is not None:
         payload["per_event_metrics"] = per_event_metrics
     output_path = (

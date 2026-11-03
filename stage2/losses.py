@@ -107,14 +107,18 @@ def transition_loss_terms(output, batch, args, device):
     )
     wet_bce = (wet_bce_raw * mask).sum() / mask.sum().clamp_min(1.0)
     wet_dice = soft_dice_loss(wet_logits, wet, mask)
-    component = 0.5 * (
-        masked_huber(component_x, batch["component_x"], wet, 0.25)
-        + masked_huber(component_y, batch["component_y"], wet, 0.25)
-    )
-    dry_component = (
-        ((component_x.square() + component_y.square()) * dry).sum()
-        / dry.sum().clamp_min(1.0)
-    )
+    if getattr(args, "depth_extent_only", False):
+        component = depth.sum() * 0.0
+        dry_component = component
+    else:
+        component = 0.5 * (
+            masked_huber(component_x, batch["component_x"], wet, 0.25)
+            + masked_huber(component_y, batch["component_y"], wet, 0.25)
+        )
+        dry_component = (
+            ((component_x.square() + component_y.square()) * dry).sum()
+            / dry.sum().clamp_min(1.0)
+        )
     loss = (
         depth_loss
         + args.transition_depth_loss_weight * transition_depth
@@ -190,65 +194,81 @@ def delta_aware_loss_terms(output, batch, args, device):
     stable_depth_delta = weighted_masked_huber(
         depth_delta, true_depth_delta, batch["mask"], regimes["stable"], 0.05
     )
-    true_component_delta = torch.stack(
-        [
-            batch["component_x"] - batch["previous_component_x"],
-            batch["component_y"] - batch["previous_component_y"],
-        ],
-        dim=1,
-    )
-    component_mask = active.unsqueeze(1).expand_as(component_delta)
-    component_delta_loss = weighted_masked_huber(
-        component_delta, true_component_delta, component_mask, regimes["all"], 0.10
-    )
-    predicted_denominator = depth.clamp_min(args.wet_threshold)
-    target_denominator = batch["depth"].clamp_min(args.wet_threshold)
-    predicted_velocity = torch.stack(
-        [component_x / predicted_denominator, component_y / predicted_denominator], dim=1
-    )
-    target_velocity = torch.stack(
-        [
-            batch["component_x"] / target_denominator,
-            batch["component_y"] / target_denominator,
-        ],
-        dim=1,
-    )
-    velocity_mask = target_wet.unsqueeze(1).expand_as(predicted_velocity)
-    if getattr(args, "derived_velocity_loss_type", "huber") == "mse":
-        derived_velocity = weighted_masked_mse(
-            predicted_velocity, target_velocity, velocity_mask, regimes["all"]
-        )
+    # Extra symmetric physical-depth supervision on deep, rising target cells.
+    # Mask uses reference data only during training; inference is unchanged.
+    deep_rising = depth.sum() * 0.0
+    deep_rising_weight = getattr(args, "deep_rising_loss_weight", 0.0)
+    if deep_rising_weight > 0:
+        selected = ((batch["depth"] >= getattr(args,"deep_rising_depth_threshold",1.0))
+                    & ((batch["depth"]-true_previous_depth) >=
+                       getattr(args,"deep_rising_change_threshold",0.1)))
+        deep_rising = masked_huber(depth,batch["depth"],
+                                  batch["mask"] * selected.to(depth.dtype),1.0)
+    if getattr(args, "depth_extent_only", False):
+        component_delta_loss = depth.sum() * 0.0
+        derived_velocity = component_delta_loss
+        velocity_direction = component_delta_loss
+        boundary_flux = component_delta_loss
     else:
-        derived_velocity = weighted_masked_huber(
-            predicted_velocity,
-            target_velocity,
-            velocity_mask,
-            regimes["all"],
-            getattr(args, "derived_velocity_huber_delta", 0.25),
+        true_component_delta = torch.stack(
+            [
+                batch["component_x"] - batch["previous_component_x"],
+                batch["component_y"] - batch["previous_component_y"],
+            ],
+            dim=1,
         )
-    target_speed = torch.linalg.vector_norm(target_velocity, dim=1)
-    predicted_speed = torch.linalg.vector_norm(predicted_velocity, dim=1)
-    moving = (target_speed >= getattr(args, "moving_velocity_threshold", 0.01)).float()
-    moving = moving * target_wet
-    cosine = (
-        (predicted_velocity * target_velocity).sum(dim=1)
-        / (predicted_speed * target_speed).clamp_min(1e-6)
-    ).clamp(-1.0, 1.0)
-    velocity_direction = ((1.0 - cosine) * moving).sum() / moving.sum().clamp_min(1.0)
+        component_mask = active.unsqueeze(1).expand_as(component_delta)
+        component_delta_loss = weighted_masked_huber(
+            component_delta, true_component_delta, component_mask, regimes["all"], 0.10
+        )
+        predicted_denominator = depth.clamp_min(args.wet_threshold)
+        target_denominator = batch["depth"].clamp_min(args.wet_threshold)
+        predicted_velocity = torch.stack(
+            [component_x / predicted_denominator, component_y / predicted_denominator], dim=1
+        )
+        target_velocity = torch.stack(
+            [
+                batch["component_x"] / target_denominator,
+                batch["component_y"] / target_denominator,
+            ],
+            dim=1,
+        )
+        velocity_mask = target_wet.unsqueeze(1).expand_as(predicted_velocity)
+        if getattr(args, "derived_velocity_loss_type", "huber") == "mse":
+            derived_velocity = weighted_masked_mse(
+                predicted_velocity, target_velocity, velocity_mask, regimes["all"]
+            )
+        else:
+            derived_velocity = weighted_masked_huber(
+                predicted_velocity,
+                target_velocity,
+                velocity_mask,
+                regimes["all"],
+                getattr(args, "derived_velocity_huber_delta", 0.25),
+            )
+        target_speed = torch.linalg.vector_norm(target_velocity, dim=1)
+        predicted_speed = torch.linalg.vector_norm(predicted_velocity, dim=1)
+        moving = (target_speed >= getattr(args, "moving_velocity_threshold", 0.01)).float()
+        moving = moving * target_wet
+        cosine = (
+            (predicted_velocity * target_velocity).sum(dim=1)
+            / (predicted_speed * target_speed).clamp_min(1e-6)
+        ).clamp(-1.0, 1.0)
+        velocity_direction = ((1.0 - cosine) * moving).sum() / moving.sum().clamp_min(1.0)
 
-    # Supervise normal unit discharge on tile boundaries. This is a local,
-    # target-based proxy for boundary flux; cross-tile conservation requires
-    # jointly predicted neighboring tiles and is intentionally deferred.
-    boundary_mask = torch.zeros_like(target_wet)
-    boundary_mask[:, 0, :] = 1.0
-    boundary_mask[:, -1, :] = 1.0
-    boundary_mask[:, :, 0] = 1.0
-    boundary_mask[:, :, -1] = 1.0
-    boundary_mask = boundary_mask * target_wet
-    boundary_flux = 0.5 * (
-        masked_huber(component_x, batch["component_x"], boundary_mask, 0.25)
-        + masked_huber(component_y, batch["component_y"], boundary_mask, 0.25)
-    )
+        # Supervise normal unit discharge on tile boundaries. This is a local,
+        # target-based proxy for boundary flux; cross-tile conservation requires
+        # jointly predicted neighboring tiles and is intentionally deferred.
+        boundary_mask = torch.zeros_like(target_wet)
+        boundary_mask[:, 0, :] = 1.0
+        boundary_mask[:, -1, :] = 1.0
+        boundary_mask[:, :, 0] = 1.0
+        boundary_mask[:, :, -1] = 1.0
+        boundary_mask = boundary_mask * target_wet
+        boundary_flux = 0.5 * (
+            masked_huber(component_x, batch["component_x"], boundary_mask, 0.25)
+            + masked_huber(component_y, batch["component_y"], boundary_mask, 0.25)
+        )
     valid_count = batch["mask"].sum(dim=(-2, -1)).clamp_min(1.0)
     predicted_storage_change = (
         ((depth - batch["previous_depth"]) * batch["mask"]).sum(dim=(-2, -1))
@@ -302,6 +322,7 @@ def delta_aware_loss_terms(output, batch, args, device):
         + getattr(args, "boundary_flux_loss_weight", 0.0) * boundary_flux
         + args.storage_change_loss_weight * storage_change
         + getattr(args, "activity_gate_loss_weight", 0.0) * activity_gate
+        + deep_rising_weight * deep_rising
     )
     values.update(
         {
@@ -313,6 +334,7 @@ def delta_aware_loss_terms(output, batch, args, device):
             "boundary_flux": boundary_flux,
             "storage_change": storage_change,
             "activity_gate": activity_gate,
+            "deep_rising": deep_rising,
         }
     )
     nonfinite = [name for name, value in values.items() if not torch.isfinite(value)]

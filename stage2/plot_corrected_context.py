@@ -57,8 +57,9 @@ def style_axis(axis):
 def finish(figure, axes, title, destination, stem, legend_models):
     figure.suptitle(title, fontsize=18, fontweight='bold', y=0.975)
     handles, labels = axes.flat[0].get_legend_handles_labels()
-    figure.legend(handles[:legend_models], labels[:legend_models], loc='upper center',
-                  bbox_to_anchor=(0.5, 0.925), ncol=legend_models, frameon=False)
+    if legend_models:
+        figure.legend(handles[:legend_models], labels[:legend_models], loc='upper center',
+                      bbox_to_anchor=(0.5, 0.925), ncol=legend_models, frameon=False)
     figure.text(0.5, 0.025, CAPTION, ha='center', fontsize=9, color='#555555')
     figure.tight_layout(rect=(0, 0.095, 1, 0.855), h_pad=2.1, w_pad=2.2)
     for suffix in ('png', 'pdf'):
@@ -67,11 +68,16 @@ def finish(figure, axes, title, destination, stem, legend_models):
 
 
 def main():
+    global CAPTION
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--csv', type=Path, default=Path(
         'results/stage2_corrected_context/20261009_fold0/comparison/comparison.csv'))
     parser.add_argument('--output-dir', type=Path)
+    parser.add_argument("--caption")
+    parser.add_argument("--coverage-csv", type=Path)
     args = parser.parse_args()
+    if args.caption:
+        CAPTION = args.caption
     destination = args.output_dir or args.csv.parent / 'plots'
     destination.mkdir(parents=True, exist_ok=True)
     data = read_comparison(args.csv)
@@ -141,6 +147,20 @@ def main():
     style_axis(axis)
     finish(figure, axes, 'Supplementary: combined physical score',
            destination, 'physical_score', 4)
+    if args.coverage_csv:
+        with args.coverage_csv.open(newline='') as handle:
+            coverage = list(csv.DictReader(handle))
+        figure, axes = plt.subplots(2, 1, figsize=(11, 7), sharex=True)
+        x = [float(row['lead_hours']) for row in coverage]
+        axes[0].plot(x, [int(row['tile_target_pairs']) for row in coverage], color='#0072B2')
+        axes[0].set_ylabel('Scored tile/target pairs')
+        axes[1].plot(x, [int(row['events']) for row in coverage], color='#D55E00')
+        axes[1].set_ylabel('Contributing events')
+        axes[1].set_xlabel('Forecast lead (hours)')
+        for axis in axes:
+            style_axis(axis)
+        finish(figure, axes, 'Evaluation coverage changes with available forecast origins',
+               destination, 'coverage_by_lead', 0)
     (destination / 'PLOTS.md').write_text(
         '# Corrected-data comparison plots\n\n'
         'Source: [comparison.csv](../comparison.csv). Fold 0, seed 45; sampled held-out '
@@ -160,7 +180,13 @@ def main():
         'an overall winner across outputs and leads.\n\n'
         'Reproduce from the repository root:\n\n'
         '```bash\npython -m stage2.plot_corrected_context\n```\n')
-    print(f'Saved three figures as PNG/PDF, gain values, and PLOTS.md in {destination}')
+    if args.caption:
+        notes_path = destination / 'PLOTS.md'
+        notes_path.write_text(notes_path.read_text() + '\nEvaluation cohort: ' + args.caption + '\n')
+    if args.coverage_csv:
+        notes_path = destination / 'PLOTS.md'
+        notes_path.write_text(notes_path.read_text() + '\n![Coverage by lead](coverage_by_lead.png)\n\nEarly flood targets contribute only where forecast origins and two observed history states exist. Compare models at the same lead; metric changes across leads also reflect changes in cohort composition.\n')
+    print(f'Saved comparison figures as PNG/PDF, gain values, and PLOTS.md in {destination}')
 
 
 if __name__ == '__main__':

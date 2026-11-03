@@ -1,0 +1,10 @@
+{
+  "status": "ready_for_new_plots",
+  "selection_method": "display_only_not_calibrated",
+  "recommended_mask": {
+    "depth_threshold_m": 0.05,
+    "probability_threshold": 0.0
+  },
+  "error_limits_m": [-0.3, 0.3],
+  "notes": "Retain original 5 cm wet definition for both panels. Blue denotes positive raw depth error. Do not transfer the older model's calibrated 10 cm mask to B. Native metrics remain unfiltered."
+}
